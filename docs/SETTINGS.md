@@ -2,28 +2,38 @@
 
 Layar pengaturan global aplikasi Renjana.
 
-## Seksi Appearance
+---
+
+## Appearance
 
 | Pengaturan | Deskripsi |
 |---|---|
-| **Dark Mode** | Toggle tema gelap / terang |
-| **Accent Color** | Pilih warna aksen UI: Blue, Purple, Green, Orange, Pink |
+| Dark Mode | Toggle tema gelap / terang |
+| Accent Color | Pilih warna aksen UI: Blue, Purple, Green, Orange, Pink |
 
-## Seksi Data
+---
 
-| Pengaturan | Deskripsi |
-|---|---|
-| **Clear All Instances** | Hapus semua instance yang ada — aksi ini permanen dan tidak bisa di-undo. Akan muncul dialog konfirmasi sebelum dieksekusi. |
-
-## Seksi Developer
+## Data
 
 | Pengaturan | Deskripsi |
 |---|---|
-| **Error Logs** | Buka layar Error Log untuk melihat log crash dan error teknis |
+| Clear All Instances | Hapus semua instance secara permanen — tidak bisa di-undo, ada dialog konfirmasi |
 
-## Seksi About
+---
+
+## Developer
+
+| Pengaturan | Deskripsi |
+|---|---|
+| Error Logs | Buka layar log crash dan error teknis |
+
+---
+
+## About
 
 Informasi versi app dan build info.
+
+---
 
 ## Navigasi
 

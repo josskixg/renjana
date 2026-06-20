@@ -1,61 +1,131 @@
-# Renjana - Android Container App
+<div align="center">
 
-Renjana is an Android container app that enables users to run multiple instances of the same app with different Google accounts simultaneously.
+# 🫙 Renjana
+
+**Android virtual container — run multiple instances of any app, each with its own Google account.**
+
+![Android](https://img.shields.io/badge/Android-10%2B-3DDC84?style=flat&logo=android&logoColor=white)
+![Kotlin](https://img.shields.io/badge/Kotlin-1.9.20-7F52FF?style=flat&logo=kotlin&logoColor=white)
+![Min SDK](https://img.shields.io/badge/Min%20SDK-29-orange?style=flat)
+![Target SDK](https://img.shields.io/badge/Target%20SDK-34-blue?style=flat)
+![License](https://img.shields.io/badge/License-Apache%202.0-green?style=flat)
+![Build](https://img.shields.io/badge/Build-Manual%20CI-lightgrey?style=flat)
+
+</div>
+
+---
+
+## What is Renjana?
+
+Renjana is an Android container app that lets you clone any installed app and run it as an isolated virtual instance. Each instance gets its own storage, settings, and Google account — no root required.
+
+---
 
 ## Features
 
-- **Multi-Instance Support**: Clone any app and run multiple instances
-- **Per-Instance Google Accounts**: Each instance can use a different Google account
-- **Root & Non-Root Support**: Works on both rooted and non-rooted devices
-- **Anti-Detection**: Built-in mechanisms to prevent detection by target apps
-- **Isolated Storage**: Each instance has its own isolated data, cache, and preferences
+| Feature | Description |
+|---|---|
+| 🗂️ Multi-Instance | Clone any app and run unlimited parallel instances |
+| 🔑 Per-Instance Accounts | Assign a different Google account to each instance |
+| 🔒 Isolated Storage | Each instance has its own data, cache, and shared prefs |
+| 🛡️ Anti-Detection | PackageManager hiding, stack trace filtering, env cloaking |
+| 📱 Fingerprint Spoofing | Per-instance IMEI, Android ID, Build fingerprint |
+| ✍️ Signature Spoof | APK signature virtualization to pass signature checks |
+| 🌱 No Root Required | Works on stock devices via Pine hook framework |
+| 🔌 Xposed Support | Enhanced hook support on rooted devices |
+
+---
 
 ## Architecture
 
 ```
-┌─────────────────────────────────────────────────────────────┐
-│                     Renjana Container App                     │
-├─────────────────────────────────────────────────────────────┤
-│  UI Layer (Jetpack Compose)                                  │
-├─────────────────────────────────────────────────────────────┤
-│  Core Layer (Instance Management, App Loading)               │
-├─────────────────────────────────────────────────────────────┤
-│  Virtualization Layer (Runtime, Filesystem, GMS)             │
-├─────────────────────────────────────────────────────────────┤
-│  Anti-Detection Layer (Signature Spoof, Environment Cloak)   │
-├─────────────────────────────────────────────────────────────┤
-│  System Integration (Xposed for root, Pine for non-root)     │
-└─────────────────────────────────────────────────────────────┘
+┌─────────────────────────────────────────────────────────┐
+│                   Renjana Container App                   │
+├─────────────────────────────────────────────────────────┤
+│  UI Layer          Jetpack Compose + Material 3           │
+├─────────────────────────────────────────────────────────┤
+│  Core Layer        Instance Management + App Loading      │
+├─────────────────────────────────────────────────────────┤
+│  Virtualization    Runtime + Filesystem + GMS Proxy       │
+├─────────────────────────────────────────────────────────┤
+│  Anti-Detection    Signature Spoof + Environment Cloak    │
+├─────────────────────────────────────────────────────────┤
+│  System            Xposed (root) / Pine (non-root)        │
+└─────────────────────────────────────────────────────────┘
 ```
+
+---
 
 ## Requirements
 
-- Android 10+ (API 29+)
+- Android 10+ (API 29)
 - Kotlin 1.9.20
 - Android Gradle Plugin 8.1.0
+- JDK 17
+
+---
 
 ## Building
 
 ```bash
+# Debug build
 ./gradlew assembleDebug
+
+# Release build (requires keystore)
+./gradlew assembleRelease
 ```
 
-## Installation
+CI builds are manual-only. Trigger from the **Actions** tab on GitHub.
+
+---
+
+## Quick Start
 
 1. Install the APK on your device
 2. Grant required permissions
-3. Add Google accounts
-4. Clone apps and assign accounts
-5. Launch instances
+3. Add a Google account via the **Accounts** tab
+4. Tap **+** on the Home screen → select an app
+5. Configure instance options → tap **Create**
+6. Tap **▶ Play** to launch the instance
 
-## Technical Details
+---
 
-See [ROADMAP.md](ROADMAP.md) for detailed architecture and implementation plan.
+## Documentation
 
-## License
+Per-screen user guides are in [`docs/`](docs/README.md).
 
-TBD
+| Screen | Guide |
+|---|---|
+| Home | [docs/HOME.md](docs/HOME.md) |
+| Apps | [docs/APPS.md](docs/APPS.md) |
+| Create Instance | [docs/CREATE_INSTANCE.md](docs/CREATE_INSTANCE.md) |
+| Instance Detail | [docs/INSTANCE_DETAIL.md](docs/INSTANCE_DETAIL.md) |
+| Diagnostics | [docs/DIAGNOSTICS.md](docs/DIAGNOSTICS.md) |
+| Accounts | [docs/ACCOUNTS.md](docs/ACCOUNTS.md) |
+| Settings | [docs/SETTINGS.md](docs/SETTINGS.md) |
+| Error Log | [docs/ERROR_LOG.md](docs/ERROR_LOG.md) |
+
+---
+
+## Tech Stack
+
+| Layer | Library | Version |
+|---|---|---|
+| UI | Jetpack Compose BOM | 2023.10.01 |
+| Database | Room | 2.6.0 |
+| Async | Coroutines | 1.7.3 |
+| Hook (non-root) | Pine | latest |
+| Hook (root) | Xposed | latest |
+| Navigation | Navigation Compose | 2.7.4 |
+
+---
+
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
+
+---
 
 ## Disclaimer
 
-This project is for educational and research purposes only. Use responsibly and in compliance with all applicable laws and terms of service.
+For educational and research purposes only. Use responsibly and in compliance with all applicable laws and terms of service.

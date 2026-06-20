@@ -53,3 +53,6 @@ local.properties
 # Generated files
 app/build/
 app/release/
+
+# OpenCode agent state
+.omo/

@@ -2,30 +2,44 @@
 
 Layar untuk melihat dan mengelola log error teknis dari Renjana.
 
+---
+
 ## Tampilan
 
-- **Daftar log** — setiap item menampilkan level error, timestamp, dan preview pesan
-- **Detail log** — tap item untuk melihat full stack trace / pesan error lengkap
+| Elemen | Deskripsi |
+|---|---|
+| Daftar log | Level error, timestamp, dan preview pesan |
+| Detail log | Full stack trace / pesan error lengkap saat item di-tap |
+
+---
 
 ## Aksi
 
 | Aksi | Cara |
 |---|---|
 | Lihat detail error | Tap pada item log |
-| Copy log | Tombol **Copy** di detail → salin ke clipboard |
-| Share log | Tombol **Share** di detail → kirim via share sheet |
-| Hapus satu log | Tombol **Delete** pada item |
-| Hapus semua log | Tombol Clear All → dialog konfirmasi |
+| Copy log | Tap **Copy** di detail → salin ke clipboard |
+| Share log | Tap **Share** di detail → kirim via share sheet |
+| Hapus satu log | Tap **Delete** pada item |
+| Hapus semua log | Tap **Clear All** → konfirmasi dialog |
+
+---
 
 ## Level Error
 
-- **ERROR** — error kritis yang mengganggu fungsi
-- **WARN** — peringatan yang perlu diperhatikan
-- **INFO** — informasi umum (hook loaded, instance started, dll.)
+| Level | Keterangan |
+|---|---|
+| ERROR | Error kritis yang mengganggu fungsi |
+| WARN | Peringatan yang perlu diperhatikan |
+| INFO | Informasi umum (hook loaded, instance started, dll.) |
+
+---
 
 ## Tujuan
 
-Digunakan untuk debugging saat instance bermasalah atau ada fitur yang tidak berjalan sesuai ekspektasi. Log bisa di-share ke developer untuk laporan bug.
+Digunakan untuk debugging saat instance bermasalah. Log bisa di-share ke developer untuk laporan bug.
+
+---
 
 ## Navigasi
 

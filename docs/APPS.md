@@ -2,25 +2,31 @@
 
 Layar untuk memilih aplikasi yang akan di-clone ke dalam instance virtual.
 
+---
+
 ## Tampilan
 
-- **Search bar** — cari app berdasarkan nama atau package name
-- **List / Grid toggle** — ubah tampilan antara list dan grid
-- **App card** — ikon, nama app, package name, badge "Cloned" jika sudah pernah dibuat instance-nya
+| Elemen | Deskripsi |
+|---|---|
+| Search bar | Cari app berdasarkan nama atau package name |
+| List / Grid toggle | Ubah tampilan antara list dan grid |
+| App card | Ikon, nama app, package name |
+| Badge "Cloned" | Muncul jika app sudah punya minimal satu instance |
+| Tombol refresh (↻) | Reload daftar app yang terinstall |
+
+---
 
 ## Aksi
 
 | Aksi | Cara |
 |---|---|
 | Cari app | Ketik di search bar |
-| Refresh daftar app | Tombol refresh (↻) di toolbar |
-| Pilih app untuk di-clone | Tap pada card app → masuk ke CreateInstanceScreen |
+| Refresh daftar | Tap tombol **↻** di toolbar |
+| Clone app | Tap pada card app → masuk ke CreateInstanceScreen |
 
-## Status App
-
-- **Badge "Cloned"** — app sudah memiliki minimal satu instance virtual
+---
 
 ## Navigasi
 
-- Tap app → `CreateInstanceScreen` (dengan package name & APK path ter-prefill)
+- Tap app → `CreateInstanceScreen` (package name & APK path ter-prefill otomatis)
 - Back → `HomeScreen`

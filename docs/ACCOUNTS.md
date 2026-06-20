@@ -2,24 +2,35 @@
 
 Layar manajemen akun Google yang terhubung ke Renjana.
 
+---
+
 ## Tampilan
 
-- **Daftar akun** — setiap item menampilkan nama, email, dan tanggal ditambahkan
-- **Empty state** — ilustrasi + teks panduan jika belum ada akun
+| Elemen | Deskripsi |
+|---|---|
+| Daftar akun | Nama, email, dan tanggal ditambahkan |
+| Empty state | Ilustrasi + panduan jika belum ada akun |
+| FAB (+) | Tombol tambah akun Google baru |
+
+---
 
 ## Aksi
 
 | Aksi | Cara |
 |---|---|
-| Tambah akun Google | Tombol **+** di toolbar |
+| Tambah akun Google | Tap FAB **+** → flow Google Sign-In |
 | Lihat detail akun | Tap pada item akun |
-| Hapus akun | Swipe atau long-press → Delete |
+| Hapus akun | Long-press atau swipe → **Delete** |
+
+---
 
 ## Catatan
 
-Akun yang ditambahkan di sini tersedia untuk digunakan oleh instance virtual yang memiliki GMS diaktifkan. Setiap instance bisa menggunakan akun yang berbeda untuk isolasi penuh.
+Akun yang ditambahkan di sini tersedia untuk semua instance yang memiliki **GMS aktif**. Setiap instance bisa menggunakan akun yang berbeda untuk isolasi penuh.
+
+---
 
 ## Navigasi
 
-- Tombol + → flow Google Sign-In
+- FAB (+) → flow Google Sign-In
 - Back → menu utama
