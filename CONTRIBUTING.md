@@ -34,13 +34,13 @@ This project adheres to a simple code of conduct:
 1. Fork the repository on GitHub
 2. Clone your fork locally:
    ```bash
-   git clone https://github.com/YOUR_USERNAME/Renjana.git
-   cd Renjana
+   git clone https://github.com/YOUR_USERNAME/renjana.git
+   cd renjana
    ```
 
 3. Add upstream remote:
    ```bash
-   git remote add upstream https://github.com/original/Renjana.git
+   git remote add upstream https://github.com/josskixg/renjana.git
    ```
 
 ## 💻 Development Setup
@@ -49,7 +49,7 @@ This project adheres to a simple code of conduct:
 
 1. Open Android Studio
 2. Select "Open an existing project"
-3. Navigate to the cloned Renjana directory
+3. Navigate to the cloned renjana directory
 4. Wait for Gradle sync to complete
 
 ### Build Configuration
