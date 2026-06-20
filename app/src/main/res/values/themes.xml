@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <style name="Theme.Renjana" parent="android:Theme.Material.Light.NoActionBar">
+        <item name="android:colorPrimary">#FFFFFFFF</item>
+        <item name="android:colorPrimaryDark">#FFE0E0E0</item>
+        <item name="android:colorAccent">#FF9E9E9E</item>
+        <item name="android:windowBackground">@android:color/white</item>
+    </style>
+
+    <style name="Theme.Renjana.Transparent" parent="Theme.Renjana">
+        <item name="android:windowBackground">@android:color/transparent</item>
+        <item name="android:windowIsTranslucent">true</item>
+        <item name="android:windowNoTitle">true</item>
+    </style>
+</resources>

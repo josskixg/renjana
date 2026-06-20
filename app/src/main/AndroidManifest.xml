@@ -1,0 +1,108 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
+
+    <!-- Permissions for container functionality -->
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" 
+        android:maxSdkVersion="32" />
+    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" 
+        android:maxSdkVersion="29" />
+    <uses-permission android:name="android.permission.MANAGE_EXTERNAL_STORAGE" 
+        tools:ignore="ScopedStorage" />
+    <uses-permission android:name="android.permission.QUERY_ALL_PACKAGES" 
+        tools:ignore="QueryAllPackagesPermission" />
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+
+    <application
+        android:name=".RenjanaApplication"
+        android:allowBackup="true"
+        android:icon="@mipmap/ic_launcher"
+        android:label="@string/app_name"
+        android:roundIcon="@mipmap/ic_launcher_round"
+        android:supportsRtl="true"
+        android:theme="@style/Theme.Renjana"
+        android:usesCleartextTraffic="true"
+        tools:targetApi="31">
+        
+        <!-- Main Activity -->
+        <activity
+            android:name=".ui.MainActivity"
+            android:exported="true"
+            android:label="@string/app_name"
+            android:theme="@style/Theme.Renjana">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+
+        <!-- Wrapper Activity for running guest apps -->
+        <activity
+            android:name=".core.WrapperActivity"
+            android:exported="false"
+            android:configChanges="orientation|screenSize|keyboardHidden|keyboard|screenLayout|smallestScreenSize|uiMode|layoutDirection|fontScale|locale"
+            android:launchMode="standard"
+            android:process=":container"
+            android:taskAffinity=":container" />
+
+        <!-- Stub Activities for guest app instances -->
+        <activity android:name=".core.StubActivity_0" android:exported="false" android:theme="@style/Theme.Renjana.Transparent" />
+        <activity android:name=".core.StubActivity_1" android:exported="false" android:theme="@style/Theme.Renjana.Transparent" />
+        <activity android:name=".core.StubActivity_2" android:exported="false" android:theme="@style/Theme.Renjana.Transparent" />
+        <activity android:name=".core.StubActivity_3" android:exported="false" android:theme="@style/Theme.Renjana.Transparent" />
+        <activity android:name=".core.StubActivity_4" android:exported="false" android:theme="@style/Theme.Renjana.Transparent" />
+        <activity android:name=".core.StubActivity_5" android:exported="false" android:theme="@style/Theme.Renjana.Transparent" />
+        <activity android:name=".core.StubActivity_6" android:exported="false" android:theme="@style/Theme.Renjana.Transparent" />
+        <activity android:name=".core.StubActivity_7" android:exported="false" android:theme="@style/Theme.Renjana.Transparent" />
+        <activity android:name=".core.StubActivity_8" android:exported="false" android:theme="@style/Theme.Renjana.Transparent" />
+        <activity android:name=".core.StubActivity_9" android:exported="false" android:theme="@style/Theme.Renjana.Transparent" />
+
+        <!-- Container Service (legacy stub, kept for compatibility) -->
+        <service
+            android:name=".core.ContainerService"
+            android:exported="false"
+            android:process=":container" />
+
+        <!-- Instance Lifecycle Service (foreground service for background execution) -->
+        <service
+            android:name=".core.InstanceLifecycleService"
+            android:exported="false"
+            android:foregroundServiceType="specialUse">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="Container instance lifecycle management" />
+        </service>
+
+        <!-- FileProvider for sharing crash reports as .txt files -->
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.fileprovider"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/file_paths" />
+        </provider>
+
+        <!-- Xposed module metadata -->
+        <meta-data
+            android:name="xposedmodule"
+            android:value="true" />
+        <meta-data
+            android:name="xposeddescription"
+            android:value="Renjana - Android Container for Multi-Instance Apps" />
+        <meta-data
+            android:name="xposedminversion"
+            android:value="93" />
+        <meta-data
+            android:name="xposedscope"
+            android:resource="@array/xposed_scope" />
+
+    </application>
+
+</manifest>
