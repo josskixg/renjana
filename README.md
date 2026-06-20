@@ -39,19 +39,19 @@ Renjana is an Android container app that lets you clone any installed app and ru
 ## Architecture
 
 ```
-┌──────────────────────────────────────────────────────────────┐
-│                    Renjana Container App                      │
-├───────────────────┬──────────────────────────────────────────┤
-│  UI Layer         │  Jetpack Compose + Material 3             │
-├───────────────────┼──────────────────────────────────────────┤
-│  Core Layer       │  Instance Management + App Loading        │
-├───────────────────┼──────────────────────────────────────────┤
-│  Virtualization   │  Runtime + Filesystem + GMS Proxy         │
-├───────────────────┼──────────────────────────────────────────┤
-│  Anti-Detection   │  Signature Spoof + Environment Cloak      │
-├───────────────────┼──────────────────────────────────────────┤
-│  System           │  Xposed (root) / Pine (non-root)          │
-└───────────────────┴──────────────────────────────────────────┘
++-------------------+------------------------------------------+
+|                   Renjana Container App                       |
++-------------------+------------------------------------------+
+|  UI Layer         |  Jetpack Compose + Material 3             |
++-------------------+------------------------------------------+
+|  Core Layer       |  Instance Management + App Loading        |
++-------------------+------------------------------------------+
+|  Virtualization   |  Runtime + Filesystem + GMS Proxy         |
++-------------------+------------------------------------------+
+|  Anti-Detection   |  Signature Spoof + Environment Cloak      |
++-------------------+------------------------------------------+
+|  System           |  Xposed (root) / Pine (non-root)          |
++-------------------+------------------------------------------+
 ```
 
 ---

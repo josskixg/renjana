@@ -22,24 +22,24 @@ Renjana is an Android container app that enables users to:
 ## Architecture Overview
 
 ```
-┌──────────────────────┬──────────────────────────────────────────────┐
-│  UI Layer            │  Instance Manager, App Picker,               │
-│                      │  Account Manager, Settings                   │
-├──────────────────────┼──────────────────────────────────────────────┤
-│  Core Layer          │  InstanceManager, AppLoader,                 │
-│                      │  AccountManager, HookManager                 │
-├──────────────────────┼──────────────────────────────────────────────┤
-│  Virtualization      │  VirtualRuntime (classloader, lifecycle)     │
-│                      │  VirtualFileSystem (isolated storage)        │
-│                      │  VirtualGMS (Google services)                │
-│                      │  VirtualPackageManager (signature spoof)     │
-├──────────────────────┼──────────────────────────────────────────────┤
-│  Anti-Detection      │  Signature Spoofing, Environment Cloaking,  │
-│                      │  Detection Evasion                           │
-├──────────────────────┼──────────────────────────────────────────────┤
-│  System Integration  │  Root: Xposed/LSPosed hooks                 │
-│                      │  Non-Root: User-space virtualization         │
-└──────────────────────┴──────────────────────────────────────────────┘
++----------------------+----------------------------------------------+
+|  UI Layer            |  Instance Manager, App Picker,               |
+|                      |  Account Manager, Settings                   |
++----------------------+----------------------------------------------+
+|  Core Layer          |  InstanceManager, AppLoader,                 |
+|                      |  AccountManager, HookManager                 |
++----------------------+----------------------------------------------+
+|  Virtualization      |  VirtualRuntime (classloader, lifecycle)     |
+|                      |  VirtualFileSystem (isolated storage)        |
+|                      |  VirtualGMS (Google services)                |
+|                      |  VirtualPackageManager (signature spoof)     |
++----------------------+----------------------------------------------+
+|  Anti-Detection      |  Signature Spoofing, Environment Cloaking,   |
+|                      |  Detection Evasion                           |
++----------------------+----------------------------------------------+
+|  System Integration  |  Root: Xposed/LSPosed hooks                 |
+|                      |  Non-Root: User-space virtualization         |
++----------------------+----------------------------------------------+
 ```
 
 ---
