@@ -1,14 +1,20 @@
 package com.fesu.renjana.ui.screens
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
+import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Apps
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.BugReport
 import androidx.compose.material.icons.filled.Clear
@@ -16,9 +22,17 @@ import androidx.compose.material.icons.filled.CloudOff
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Fingerprint
+import androidx.compose.material.icons.filled.Home
+import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.PhoneAndroid
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Security
+import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material.icons.filled.VerifiedUser
+import androidx.compose.material.icons.filled.Warning
+import androidx.compose.material.icons.outlined.Layers
+import com.fesu.renjana.core.InstanceShortcutManager
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -26,6 +40,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -33,9 +48,13 @@ import androidx.compose.ui.unit.sp
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewmodel.compose.viewModel
+import android.content.Intent
+import android.net.Uri
+import android.provider.Settings
 import com.fesu.renjana.RenjanaApplication
 import com.fesu.renjana.core.InstanceState
 import com.fesu.renjana.core.DeviceDatabase
+import com.fesu.renjana.database.InstanceAppEntity
 import com.fesu.renjana.ui.components.AppIcon
 import com.fesu.renjana.ui.components.Haptics
 import com.fesu.renjana.ui.components.RunningIndicator
@@ -57,7 +76,13 @@ class InstanceDetailViewModelFactory(
     }
 }
 
-enum class DetailTab(val label: String) { OVERVIEW("Overview"), CONFIG("Config"), DEVICE("Device"), DANGER("Danger") }
+enum class DetailTab(val label: String, val icon: ImageVector) {
+    OVERVIEW("Overview", Icons.Filled.Info),
+    APPS("Apps", Icons.Filled.Apps),
+    CONFIG("Config", Icons.Filled.Settings),
+    DEVICE("Device", Icons.Filled.PhoneAndroid),
+    DANGER("Danger", Icons.Filled.Warning)
+}
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -65,6 +90,7 @@ fun InstanceDetailScreen(
     instanceId: String,
     onNavigateBack: () -> Unit,
     onNavigateToDiagnostics: () -> Unit = {},
+    onNavigateToAddApp: (instanceId: String) -> Unit = {},
     viewModel: InstanceDetailViewModel = viewModel(
         factory = InstanceDetailViewModelFactory(instanceId)
     )
@@ -74,12 +100,15 @@ fun InstanceDetailScreen(
     val actionSuccess by viewModel.actionSuccess.collectAsState()
     val isDeleted by viewModel.isDeleted.collectAsState()
 
+    val context = LocalContext.current
     val snackbarHostState = remember { SnackbarHostState() }
     var showDeleteDialog by remember { mutableStateOf(false) }
     var showClearDialog by remember { mutableStateOf(false) }
     var showRenameDialog by remember { mutableStateOf(false) }
+    var showCustomizeDialog by remember { mutableStateOf(false) }
     var selectedTab by remember { mutableStateOf(DetailTab.OVERVIEW) }
     val haptics = rememberHaptics()
+    var shortcutMessage by remember { mutableStateOf<String?>(null) }
 
     // Poll running state
     var runningState by remember { mutableStateOf<InstanceState>(InstanceState.IDLE) }
@@ -97,6 +126,9 @@ fun InstanceDetailScreen(
     }
     LaunchedEffect(actionSuccess) {
         actionSuccess?.let { snackbarHostState.showSnackbar(it); viewModel.clearActionSuccess() }
+    }
+    LaunchedEffect(shortcutMessage) {
+        shortcutMessage?.let { snackbarHostState.showSnackbar(it); shortcutMessage = null }
     }
 
     if (showDeleteDialog) {
@@ -124,6 +156,126 @@ fun InstanceDetailScreen(
             dismissButton = { TextButton(onClick = { showClearDialog = false }) { Text("Cancel") } }
         )
     }
+    // ── Customize Dialog (color + emoji) ──────────────────────────────────
+    if (showCustomizeDialog) {
+        val presetColors = listOf(
+            "#F44336" to "Red",
+            "#FF5722" to "Orange",
+            "#FFC107" to "Amber",
+            "#4CAF50" to "Green",
+            "#009688" to "Teal",
+            "#2196F3" to "Blue",
+            "#3F51B5" to "Indigo",
+            "#9C27B0" to "Purple",
+            "#E91E63" to "Pink",
+            "#607D8B" to "Blue Grey",
+            "#795548" to "Brown",
+            "#FF9800" to "Deep Orange"
+        )
+        var pendingColor by remember { mutableStateOf(instance?.config?.instanceColor) }
+        var pendingEmoji by remember { mutableStateOf(instance?.config?.instanceEmoji ?: "") }
+        AlertDialog(
+            onDismissRequest = { showCustomizeDialog = false },
+            title = { Text("Customize Icon", fontWeight = FontWeight.Bold) },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
+                    // Color grid
+                    Text(
+                        "Accent Color",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    androidx.compose.foundation.lazy.grid.LazyVerticalGrid(
+                        columns = androidx.compose.foundation.lazy.grid.GridCells.Fixed(6),
+                        modifier = Modifier.height(80.dp),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        items(presetColors) { (hex, name) ->
+                            val selected = pendingColor == hex
+                            val parsedColor = try {
+                                androidx.compose.ui.graphics.Color(
+                                    android.graphics.Color.parseColor(hex)
+                                )
+                            } catch (e: Exception) { MaterialTheme.colorScheme.primary }
+                            Box(
+                                modifier = Modifier
+                                    .size(28.dp)
+                                    .clip(CircleShape)
+                                    .background(parsedColor)
+                                    .then(
+                                        if (selected) Modifier.border(
+                                            2.dp,
+                                            MaterialTheme.colorScheme.onSurface,
+                                            CircleShape
+                                        ) else Modifier
+                                    )
+                                    .clickable { pendingColor = hex },
+                                contentAlignment = Alignment.Center
+                            ) {
+                                if (selected) {
+                                    Text(
+                                        "✓",
+                                        color = MaterialTheme.colorScheme.onPrimaryContainer,
+                                        fontSize = 12.sp
+                                    )
+                                }
+                            }
+                        }
+                        // "None" option
+                        item {
+                            Box(
+                                modifier = Modifier
+                                    .size(28.dp)
+                                    .clip(CircleShape)
+                                    .background(MaterialTheme.colorScheme.surfaceVariant)
+                                    .then(
+                                        if (pendingColor == null) Modifier.border(
+                                            2.dp,
+                                            MaterialTheme.colorScheme.onSurface,
+                                            CircleShape
+                                        ) else Modifier
+                                    )
+                                    .clickable { pendingColor = null },
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text(
+                                    "✕",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                        }
+                    }
+                    // Emoji input
+                    Text(
+                        "Label / Emoji (max 2 chars)",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    OutlinedTextField(
+                        value = pendingEmoji,
+                        onValueChange = { if (it.length <= 2) pendingEmoji = it },
+                        placeholder = { Text("e.g. 2 or 🔥") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(10.dp),
+                        textStyle = MaterialTheme.typography.bodyMedium
+                    )
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    viewModel.updateVisualConfig(pendingColor, pendingEmoji)
+                    showCustomizeDialog = false
+                }) { Text("Save") }
+            },
+            dismissButton = {
+                TextButton(onClick = { showCustomizeDialog = false }) { Text("Cancel") }
+            }
+        )
+    }
+
     if (showRenameDialog) {
         var editName by remember { mutableStateOf(instance?.appName ?: "") }
         AlertDialog(
@@ -167,19 +319,25 @@ fun InstanceDetailScreen(
                 .verticalScroll(rememberScrollState())
         ) {
             // ── Hero Header with gradient ──
+            Surface(
+                modifier = Modifier.fillMaxWidth(),
+                shadowElevation = 4.dp,
+                color = androidx.compose.ui.graphics.Color.Transparent
+            ) {
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
                     .background(
                         Brush.verticalGradient(
-                            listOf(
-                                MaterialTheme.colorScheme.primaryContainer,
-                                MaterialTheme.colorScheme.background
+                            colorStops = arrayOf(
+                                0f to MaterialTheme.colorScheme.primaryContainer,
+                                0.6f to MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.3f),
+                                1f to MaterialTheme.colorScheme.background
                             )
                         )
                     )
-                    .statusBarsPadding()
                     .padding(24.dp)
+                    .padding(bottom = 16.dp)
             ) {
                 Column {
                     Row(
@@ -190,19 +348,34 @@ fun InstanceDetailScreen(
                         IconButton(onClick = onNavigateBack) {
                             Icon(Icons.Filled.ArrowBack, contentDescription = "Back")
                         }
-                        IconButton(onClick = { showRenameDialog = true }) {
-                            Icon(Icons.Filled.Edit, contentDescription = "Rename")
+                        Row {
+                            IconButton(onClick = {
+                                val pinned = InstanceShortcutManager.requestPinShortcut(context, inst)
+                                shortcutMessage = if (pinned) "Shortcut added to homescreen"
+                                                  else "Homescreen shortcuts not supported on this launcher"
+                            }) {
+                                Icon(Icons.Filled.Home, contentDescription = "Add to homescreen")
+                            }
+                            IconButton(onClick = { showRenameDialog = true }) {
+                                Icon(Icons.Filled.Edit, contentDescription = "Rename")
+                            }
                         }
                     }
                     Spacer(modifier = Modifier.height(8.dp))
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        AppIcon(packageName = inst.packageName, size = 72.dp)
+                        AppIcon(
+                            packageName = inst.packageName,
+                            size = 72.dp,
+                            showRenjanaBadge = true,
+                            instanceColor = inst.config.instanceColor,
+                            instanceEmoji = inst.config.instanceEmoji
+                        )
                         Spacer(modifier = Modifier.width(16.dp))
                         Column(modifier = Modifier.weight(1f)) {
                             Row(verticalAlignment = Alignment.CenterVertically) {
                                 Text(
                                     text = inst.appName,
-                                    style = MaterialTheme.typography.headlineSmall,
+                                    style = MaterialTheme.typography.titleLarge,
                                     fontWeight = FontWeight.Bold,
                                     maxLines = 1,
                                     overflow = TextOverflow.Ellipsis
@@ -222,56 +395,67 @@ fun InstanceDetailScreen(
                                 overflow = TextOverflow.Ellipsis
                             )
                             Text(
-                                text = "v${inst.versionName}  ·  ${runningState.name.lowercase().replaceFirstChar { it.uppercase() }}",
+                                text = "v${inst.versionName}",
                                 style = MaterialTheme.typography.labelMedium,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            Text(
+                                text = runningState.name.lowercase().replaceFirstChar { it.uppercase() },
+                                style = MaterialTheme.typography.labelMedium,
+                                color = when (runningState) {
+                                    InstanceState.RUNNING -> MaterialTheme.colorScheme.primary
+                                    InstanceState.PAUSED -> MaterialTheme.colorScheme.secondary
+                                    else -> MaterialTheme.colorScheme.onSurfaceVariant
+                                }
                             )
                         }
                     }
                     Spacer(modifier = Modifier.height(20.dp))
-                    Button(
-                        onClick = { haptics.confirm(); viewModel.launchInstance() },
-                        modifier = Modifier.fillMaxWidth(),
-                        shape = RoundedCornerShape(14.dp),
-                        enabled = runningState != InstanceState.RUNNING
-                    ) {
-                        Icon(Icons.Filled.PlayArrow, contentDescription = null)
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text("Launch Instance", fontWeight = FontWeight.SemiBold)
+                    if (runningState == InstanceState.RUNNING || runningState == InstanceState.PAUSED) {
+                        Button(
+                            onClick = { haptics.confirm(); viewModel.stopInstance() },
+                            colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error),
+                            modifier = Modifier.fillMaxWidth().height(48.dp),
+                            shape = RoundedCornerShape(14.dp)
+                        ) {
+                            Icon(Icons.Filled.Stop, contentDescription = null, modifier = Modifier.size(18.dp))
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text("Stop", style = MaterialTheme.typography.labelLarge)
+                        }
+                    } else {
+                        Button(
+                            onClick = { haptics.confirm(); viewModel.launchInstance() },
+                            modifier = Modifier.fillMaxWidth().height(48.dp),
+                            shape = RoundedCornerShape(14.dp)
+                        ) {
+                            Icon(Icons.Filled.PlayArrow, contentDescription = null)
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text("Launch Instance", fontWeight = FontWeight.SemiBold)
+                        }
                     }
                 }
             }
+            } // end Surface
 
             // ── Tab Bar ──
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 16.dp, vertical = 8.dp),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            val tabs = DetailTab.values()
+            ScrollableTabRow(
+                selectedTabIndex = tabs.indexOf(selectedTab),
+                edgePadding = 16.dp,
+                containerColor = MaterialTheme.colorScheme.surface,
+                divider = {}
             ) {
-                DetailTab.values().forEach { tab ->
-                    val selected = selectedTab == tab
-                    Surface(
-                        shape = RoundedCornerShape(12.dp),
-                        color = if (selected) MaterialTheme.colorScheme.primary
-                                else MaterialTheme.colorScheme.surfaceVariant,
-                        modifier = Modifier
-                            .weight(1f)
-                            .clip(RoundedCornerShape(12.dp))
-                            .clickable { selectedTab = tab }
-                    ) {
-                        Text(
-                            text = tab.label,
-                            modifier = Modifier
-                                .padding(vertical = 10.dp)
-                                .fillMaxWidth(),
-                            textAlign = androidx.compose.ui.text.style.TextAlign.Center,
-                            style = MaterialTheme.typography.labelLarge,
-                            color = if (selected) MaterialTheme.colorScheme.onPrimary
-                                    else MaterialTheme.colorScheme.onSurfaceVariant,
-                            fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal
-                        )
-                    }
+                tabs.forEachIndexed { index, tab ->
+                    Tab(
+                        selected = selectedTab == tab,
+                        onClick = { selectedTab = tab },
+                        text = { Text(tab.label, style = MaterialTheme.typography.labelMedium) },
+                        icon = { Icon(tab.icon, contentDescription = null, modifier = Modifier.size(16.dp)) },
+                        selectedContentColor = if (tab == DetailTab.DANGER) MaterialTheme.colorScheme.error
+                                               else MaterialTheme.colorScheme.primary,
+                        unselectedContentColor = if (tab == DetailTab.DANGER) MaterialTheme.colorScheme.error.copy(alpha = 0.6f)
+                                                 else MaterialTheme.colorScheme.onSurfaceVariant
+                    )
                 }
             }
 
@@ -284,6 +468,77 @@ fun InstanceDetailScreen(
                         modifier = Modifier.padding(horizontal = 16.dp),
                         verticalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
+                        // ── Customize Card ────────────────────────────────
+                        SectionCard {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable { showCustomizeDialog = true }
+                                    .padding(horizontal = 16.dp, vertical = 12.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                                ) {
+                                    // Color preview circle
+                                    val accentColor = inst.config.instanceColor?.let {
+                                        try {
+                                            androidx.compose.ui.graphics.Color(
+                                                android.graphics.Color.parseColor(it)
+                                            )
+                                        } catch (e: Exception) { null }
+                                    }
+                                    Box(
+                                        modifier = Modifier
+                                            .size(24.dp)
+                                            .clip(CircleShape)
+                                            .background(
+                                                accentColor ?: MaterialTheme.colorScheme.surfaceVariant
+                                            )
+                                            .then(
+                                                if (accentColor == null) Modifier.border(
+                                                    1.dp,
+                                                    MaterialTheme.colorScheme.outline,
+                                                    CircleShape
+                                                ) else Modifier
+                                            )
+                                    )
+                                    Column {
+                                        Text(
+                                            "Customize",
+                                            style = MaterialTheme.typography.bodyMedium,
+                                            fontWeight = FontWeight.Medium
+                                        )
+                                        Text(
+                                            buildString {
+                                                val c = inst.config.instanceColor
+                                                val e = inst.config.instanceEmoji
+                                                if (c != null) append(c)
+                                                if (c != null && !e.isNullOrBlank()) append("  ·  ")
+                                                if (!e.isNullOrBlank()) append(e)
+                                                if (c == null && e.isNullOrBlank()) append("No color or label set")
+                                            },
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                    }
+                                }
+                                if (!inst.config.instanceEmoji.isNullOrBlank()) {
+                                    Surface(
+                                        shape = CircleShape,
+                                        color = MaterialTheme.colorScheme.surfaceVariant
+                                    ) {
+                                        Text(
+                                            text = inst.config.instanceEmoji!!,
+                                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                                            style = MaterialTheme.typography.bodyMedium
+                                        )
+                                    }
+                                }
+                            }
+                        }
                         SectionCard {
                             InfoRow("Created", dateFormat.format(Date(inst.createdAt)))
                             Divider(modifier = Modifier.padding(start = 16.dp))
@@ -305,6 +560,75 @@ fun InstanceDetailScreen(
                             Text("Run Diagnostics")
                         }
                         Spacer(modifier = Modifier.height(32.dp))
+                    }
+                }
+                DetailTab.APPS -> {
+                    val instanceApps by viewModel.instanceApps.collectAsState()
+                    var pendingRemovePackage by remember { mutableStateOf<String?>(null) }
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(16.dp)
+                    ) {
+                        instanceApps.forEach { app ->
+                            ListItem(
+                                headlineContent = { Text(app.appName) },
+                                supportingContent = {
+                                    Text(
+                                        app.packageName,
+                                        style = MaterialTheme.typography.bodySmall
+                                    )
+                                },
+                                leadingContent = {
+                                    AppIcon(
+                                        packageName = app.packageName,
+                                        size = 44.dp,
+                                        showRenjanaBadge = false
+                                    )
+                                },
+                                trailingContent = {
+                                    Row {
+                                        IconButton(onClick = { viewModel.launchApp(app.packageName) }) {
+                                            Icon(Icons.Filled.PlayArrow, contentDescription = "Launch")
+                                        }
+                                        IconButton(onClick = { pendingRemovePackage = app.packageName }) {
+                                            Icon(
+                                                Icons.Filled.Delete,
+                                                contentDescription = "Remove",
+                                                tint = MaterialTheme.colorScheme.error
+                                            )
+                                        }
+                                    }
+                                }
+                            )
+                            Divider()
+                        }
+                        OutlinedButton(
+                            onClick = { onNavigateToAddApp(inst.id) },
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(top = 16.dp)
+                        ) {
+                            Icon(Icons.Filled.Add, contentDescription = null)
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text("Add App")
+                        }
+                        pendingRemovePackage?.let { pkg ->
+                            AlertDialog(
+                                onDismissRequest = { pendingRemovePackage = null },
+                                title = { Text("Remove App") },
+                                text = { Text("Remove $pkg from this instance?") },
+                                confirmButton = {
+                                    TextButton(
+                                        onClick = { viewModel.removeApp(pkg); pendingRemovePackage = null },
+                                        colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.error)
+                                    ) { Text("Remove") }
+                                },
+                                dismissButton = {
+                                    TextButton(onClick = { pendingRemovePackage = null }) { Text("Cancel") }
+                                }
+                            )
+                        }
                     }
                 }
                 DetailTab.CONFIG -> {
@@ -343,6 +667,43 @@ fun InstanceDetailScreen(
                                 subtitle = "Randomize device fingerprint",
                                 checked = inst.config.enableFingerprint,
                                 onCheckedChange = { viewModel.toggleFingerprint(it) }
+                            )
+                        }
+
+                        // ── Quick Switch Bubble ──────────────────────────────
+                        val context = LocalContext.current
+                        var overlayGranted by remember {
+                            mutableStateOf(Settings.canDrawOverlays(context))
+                        }
+                        SectionCard {
+                            ConfigToggleRow(
+                                icon = Icons.Outlined.Layers,
+                                title = "Quick switch bubble",
+                                subtitle = if (overlayGranted)
+                                    "Floating bubble to switch between running instances"
+                                else
+                                    "Tap to grant overlay permission first",
+                                checked = overlayGranted &&
+                                    RenjanaApplication.get().bubbleService != null,
+                                onCheckedChange = { enabled ->
+                                    if (!Settings.canDrawOverlays(context)) {
+                                        // Send user to the system overlay permission screen
+                                        val intent = Intent(
+                                            Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+                                            Uri.parse("package:${context.packageName}")
+                                        ).apply { addFlags(Intent.FLAG_ACTIVITY_NEW_TASK) }
+                                        context.startActivity(intent)
+                                    } else {
+                                        overlayGranted = true
+                                        if (enabled) {
+                                            com.fesu.renjana.core.QuickSwitchBubbleService
+                                                .start(context)
+                                        } else {
+                                            com.fesu.renjana.core.QuickSwitchBubbleService
+                                                .stop(context)
+                                        }
+                                    }
+                                }
                             )
                         }
                         Spacer(modifier = Modifier.height(32.dp))

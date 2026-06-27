@@ -3,7 +3,6 @@ package com.fesu.renjana.ui.screens
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -28,10 +27,12 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import com.fesu.renjana.RenjanaApplication
+import kotlinx.coroutines.launch
 import com.fesu.renjana.ui.theme.AccentBlue
 import com.fesu.renjana.ui.theme.AccentGreen
 import com.fesu.renjana.ui.theme.AccentOrange
 import com.fesu.renjana.ui.theme.AccentPink
+import com.fesu.renjana.BuildConfig
 import com.fesu.renjana.ui.theme.AccentPurple
 
 data class AccentOption(val name: String, val color: Color)
@@ -56,6 +57,7 @@ fun SettingsScreen(
     val instanceManager = remember { RenjanaApplication.get().instanceManager }
     val instanceCount by instanceManager.getInstanceCount().collectAsState(initial = 0)
     var showClearAllDialog by remember { mutableStateOf(false) }
+    val coroutineScope = rememberCoroutineScope()
 
     if (showClearAllDialog) {
         AlertDialog(
@@ -64,7 +66,10 @@ fun SettingsScreen(
             text = { Text("This will delete ALL instances and their data. This cannot be undone.") },
             confirmButton = {
                 TextButton(
-                    onClick = { showClearAllDialog = false },
+                    onClick = {
+                        coroutineScope.launch { instanceManager.deleteAllInstances() }
+                        showClearAllDialog = false
+                    },
                     colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.error)
                 ) { Text("Delete All") }
             },
@@ -72,21 +77,21 @@ fun SettingsScreen(
         )
     }
 
+    Scaffold(
+        topBar = {
+            TopAppBar(
+                title = { Text("Settings", fontWeight = FontWeight.Bold) }
+            )
+        },
+        containerColor = MaterialTheme.colorScheme.background,
+    ) { innerPadding ->
     Column(
         modifier = Modifier
             .fillMaxSize()
+            .padding(innerPadding)
             .background(MaterialTheme.colorScheme.background)
-            .statusBarsPadding()
             .verticalScroll(rememberScrollState())
     ) {
-        // Header
-        Text(
-            text = "Settings",
-            style = MaterialTheme.typography.headlineSmall,
-            fontWeight = FontWeight.Bold,
-            modifier = Modifier
-                .padding(horizontal = 16.dp, vertical = 12.dp)
-        )
 
         // ── Appearance ──
         SectionTitle("Appearance")
@@ -103,7 +108,7 @@ fun SettingsScreen(
         SettingsCard {
             Column(modifier = Modifier.padding(16.dp)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(Icons.Filled.Palette, contentDescription = null, modifier = Modifier.size(24.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Icon(Icons.Filled.Palette, contentDescription = "Accent Color", modifier = Modifier.size(24.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
                     Spacer(modifier = Modifier.width(16.dp))
                     Text("Accent Color", style = MaterialTheme.typography.bodyLarge)
                 }
@@ -151,6 +156,14 @@ fun SettingsScreen(
         // ── Diagnostics ──
         SectionTitle("Diagnostics")
         SettingsCard {
+            SettingsInfoRow(
+                icon = Icons.Filled.Info,
+                title = "Per-instance notifications",
+                value = "Active"
+            )
+        }
+        Spacer(modifier = Modifier.height(8.dp))
+        SettingsCard {
             ClickableRow(
                 icon = Icons.Filled.BugReport,
                 title = "Error Logs",
@@ -165,7 +178,7 @@ fun SettingsScreen(
         // ── About ──
         SectionTitle("About")
         SettingsCard {
-            SettingsInfoRow(icon = Icons.Filled.Info, title = "Version", value = "0.0.1")
+            SettingsInfoRow(icon = Icons.Filled.Info, title = "Version", value = BuildConfig.VERSION_NAME)
         }
         Spacer(modifier = Modifier.height(8.dp))
         SettingsCard {
@@ -207,6 +220,7 @@ fun SettingsScreen(
         }
         Spacer(modifier = Modifier.height(32.dp))
     }
+    }
 }
 
 @Composable
@@ -234,7 +248,7 @@ private fun SettingsInfoRow(icon: ImageVector, title: String, value: String) {
         modifier = Modifier.fillMaxWidth().padding(16.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Icon(icon, contentDescription = null, modifier = Modifier.size(24.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
+        Icon(icon, contentDescription = title, modifier = Modifier.size(24.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
         Spacer(modifier = Modifier.width(16.dp))
         Text(title, style = MaterialTheme.typography.bodyLarge, modifier = Modifier.weight(1f))
         Text(value, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -251,7 +265,7 @@ private fun SettingsToggleRow(
         verticalAlignment = Alignment.CenterVertically
     ) {
         Icon(
-            icon, contentDescription = null, modifier = Modifier.size(24.dp),
+            icon, contentDescription = title, modifier = Modifier.size(24.dp),
             tint = if (checked) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
         )
         Spacer(modifier = Modifier.width(16.dp))
@@ -276,7 +290,7 @@ private fun ClickableRow(
         verticalAlignment = Alignment.CenterVertically
     ) {
         Icon(
-            icon, contentDescription = null, modifier = Modifier.size(24.dp),
+            icon, contentDescription = title, modifier = Modifier.size(24.dp),
             tint = if (isDanger) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant
         )
         Spacer(modifier = Modifier.width(16.dp))

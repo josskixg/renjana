@@ -115,6 +115,8 @@ class InstanceLifecycleService : Service() {
                     )
                     runningInstances[instanceId] = running
                     notifManager.showInstanceNotification(running)
+                    // Start bubble service now that at least one instance is running
+                    QuickSwitchBubbleService.start(this@InstanceLifecycleService)
                     RenjanaLog.i(TAG, "Instance registered: $instanceId (${instance.appName})")
                 }
             } catch (e: Exception) {
@@ -213,8 +215,13 @@ class InstanceLifecycleService : Service() {
     private fun checkAndStopIfEmpty() {
         if (runningInstances.isEmpty()) {
             RenjanaLog.i(TAG, "No instances running, stopping service")
+            // Stop bubble overlay — no instances left to switch between
+            QuickSwitchBubbleService.stop(this)
             stopForeground(STOP_FOREGROUND_REMOVE)
             stopSelf()
+        } else {
+            // Refresh panel in case the list changed
+            RenjanaApplication.get().bubbleService?.refreshPanel()
         }
     }
 

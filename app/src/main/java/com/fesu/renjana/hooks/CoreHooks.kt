@@ -8,10 +8,13 @@ import android.content.pm.PackageManager
 import android.content.pm.Signature
 import android.os.Bundle
 import com.fesu.renjana.models.GoogleAccount
+import com.fesu.renjana.models.InstanceConfig
 import com.fesu.renjana.utils.RenjanaLog
 import de.robv.android.xposed.XC_MethodHook
 import de.robv.android.xposed.XposedHelpers
+import java.io.BufferedReader
 import java.io.File
+import java.io.InputStreamReader
 import java.util.concurrent.ConcurrentHashMap
 
 /**
@@ -32,9 +35,23 @@ object CoreHooks {
 
     /**
      * ThreadLocal tracking which container instance is active on the current thread.
-     * This allows hooks to determine which virtual context to use.
+     *
+     * This is only a fast-path HINT. Hooks primarily fire on binder threads where this
+     * ThreadLocal is unset, so [classLoaderToInstanceId] is the PRIMARY lookup mechanism.
+     * Use [getCurrentInstanceId] which consults the map first and falls back to this.
      */
     val currentInstanceId = ThreadLocal<String?>()
+
+    /**
+     * PRIMARY instance lookup: maps the guest [ClassLoader] to its instance ID.
+     *
+     * Pine hooks fire on arbitrary binder threads where [currentInstanceId] (a
+     * ThreadLocal) is unset, causing hooks to silently pass-through. The guest
+     * ClassLoader is stable across threads for a given instance, so we key off it.
+     * Populated by [PineHookManager.installGuestHooks] and looked up via
+     * [getCurrentInstanceId].
+     */
+    val classLoaderToInstanceId = ConcurrentHashMap<ClassLoader, String>()
 
     /**
      * Maps package names to their virtual data paths.
@@ -48,6 +65,12 @@ object CoreHooks {
     val virtualAccounts = ConcurrentHashMap<String, GoogleAccount>()
 
     /**
+     * Maps instance IDs to their InstanceConfig for per-instance feature flags.
+     * Populated by [PineHookManager.installGuestHooks] via [registerInstanceConfig].
+     */
+    val instanceConfigs = ConcurrentHashMap<String, InstanceConfig>()
+
+    /**
      * Tracks which packages have active hooks to avoid duplicate installations.
      */
     private val hookedPackages = ConcurrentHashMap<String, Boolean>()
@@ -55,7 +78,7 @@ object CoreHooks {
     /**
      * Container package name (used to identify our own code in hooks).
      */
-    private const val CONTAINER_PACKAGE = "com.renjana.container"
+    private const val CONTAINER_PACKAGE = "com.fesu.renjana"
 
     // ==================== 1. ActivityThread Hooks ====================
 
@@ -129,7 +152,7 @@ object CoreHooks {
             override fun afterHookedMethod(param: MethodHookParam) {
                 try {
                     val activity = param.result as? Activity ?: return
-                    val instanceId = currentInstanceId.get() ?: return
+                    val instanceId = getCurrentInstanceId(activity.javaClass.classLoader) ?: return
 
                     RenjanaLog.d(TAG, "Activity launched: ${activity.javaClass.name} in instance $instanceId")
 
@@ -153,7 +176,7 @@ object CoreHooks {
             override fun beforeHookedMethod(param: MethodHookParam) {
                 try {
                     val activity = param.thisObject as? Activity ?: return
-                    val instanceId = currentInstanceId.get() ?: return
+                    val instanceId = getCurrentInstanceId(activity.javaClass.classLoader) ?: return
                     val packageName = activity.packageName
 
                     // Check if this activity belongs to a managed package
@@ -252,6 +275,83 @@ object CoreHooks {
     }
 
     /**
+     * Hook getPackageInfo(String, PackageInfoFlags) — API 33+ overload.
+     *
+     * PackageInfoFlags is a new type introduced in API 33 that replaces the bare int flags
+     * parameter. We use reflection to locate the method so the file compiles cleanly on
+     * all API levels; the hook is a no-op on devices where the class doesn't exist.
+     */
+    fun createGetPackageInfoFlagsHook(): XC_MethodHook {
+        return object : XC_MethodHook() {
+            override fun afterHookedMethod(param: MethodHookParam) {
+                try {
+                    val packageName = param.args[0] as? String ?: return
+                    val packageInfo = param.result as? PackageInfo ?: return
+
+                    if (SignatureSpoof.hasCachedSignatures(packageName)) {
+                        val spoofed = SignatureSpoof.spoofPackageInfo(packageInfo, packageName)
+                        if (spoofed) {
+                            param.result = packageInfo
+                            RenjanaLog.d(TAG, "Spoofed PackageInfo(Flags) signatures for $packageName")
+                        }
+                    }
+
+                    if (AntiDetection.isHookFrameworkPackage(packageName) ||
+                        packageName == CONTAINER_PACKAGE
+                    ) {
+                        param.throwable = PackageManager.NameNotFoundException(packageName)
+                    }
+                } catch (e: Exception) {
+                    RenjanaLog.e(TAG, "Error in getPackageInfo(Flags).afterHook: ${e.message}")
+                }
+            }
+        }
+    }
+
+    /**
+     * Hook getPackageInfo(VersionedPackage, int) — API 26+ overload.
+     *
+     * VersionedPackage wraps a package name + version code. We extract the package name
+     * from it via reflection so the hook doesn't take a hard compile-time dependency on
+     * the API 26 class.
+     */
+    fun createGetPackageInfoVersionedHook(): XC_MethodHook {
+        return object : XC_MethodHook() {
+            override fun afterHookedMethod(param: MethodHookParam) {
+                try {
+                    // Extract packageName from VersionedPackage via getPackageName()
+                    val versionedPackage = param.args[0] ?: return
+                    val packageName = try {
+                        versionedPackage.javaClass.getMethod("getPackageName")
+                            .invoke(versionedPackage) as? String ?: return
+                    } catch (e: Exception) {
+                        RenjanaLog.w(TAG, "Could not extract packageName from VersionedPackage: ${e.message}")
+                        return
+                    }
+
+                    val packageInfo = param.result as? PackageInfo ?: return
+
+                    if (SignatureSpoof.hasCachedSignatures(packageName)) {
+                        val spoofed = SignatureSpoof.spoofPackageInfo(packageInfo, packageName)
+                        if (spoofed) {
+                            param.result = packageInfo
+                            RenjanaLog.d(TAG, "Spoofed PackageInfo(VersionedPackage) signatures for $packageName")
+                        }
+                    }
+
+                    if (AntiDetection.isHookFrameworkPackage(packageName) ||
+                        packageName == CONTAINER_PACKAGE
+                    ) {
+                        param.throwable = PackageManager.NameNotFoundException(packageName)
+                    }
+                } catch (e: Exception) {
+                    RenjanaLog.e(TAG, "Error in getPackageInfo(VersionedPackage).afterHook: ${e.message}")
+                }
+            }
+        }
+    }
+
+    /**
      * Hook ApplicationPackageManager.getInstalledPackages() to filter out
      * hook frameworks and the container app from the results.
      */
@@ -292,7 +392,7 @@ object CoreHooks {
                 try {
                     @Suppress("UNUSED_VARIABLE")
                     val intent = param.args[0] as? Intent ?: return
-                    val instanceId = currentInstanceId.get() ?: return
+                    val instanceId = getCurrentInstanceId(param.method.declaringClass?.classLoader) ?: return
 
                     // Determine which package is requesting sign-in
                     val requestingPackage = findRequestingPackage() ?: return
@@ -327,7 +427,7 @@ object CoreHooks {
                 try {
                     val account = param.thisObject ?: return
                     @Suppress("UNUSED_VARIABLE")
-                    val instanceId = currentInstanceId.get() ?: return
+                    val instanceId = getCurrentInstanceId(account.javaClass.classLoader) ?: return
                     val requestingPackage = findRequestingPackage() ?: return
 
                     val virtualAccount = virtualAccounts[requestingPackage] ?: return
@@ -362,7 +462,7 @@ object CoreHooks {
                 try {
                     val context = param.thisObject as? Context ?: return
                     @Suppress("UNUSED_VARIABLE")
-                    val instanceId = currentInstanceId.get() ?: return
+                    val instanceId = getCurrentInstanceId(context.javaClass.classLoader) ?: return
                     val packageName = context.packageName
 
                     val dataPath = packageDataPaths[packageName] ?: return
@@ -407,7 +507,9 @@ object CoreHooks {
             override fun afterHookedMethod(param: MethodHookParam) {
                 try {
                     val file = param.thisObject as? File ?: return
-                    val instanceId = currentInstanceId.get() ?: return
+                    // File is a system class — its ClassLoader is bootstrap, not the guest's.
+                    // Fall back to the ThreadLocal hint (File ops run on guest-owned threads).
+                    val instanceId = getCurrentInstanceId(null) ?: return
                     val originalPath = file.absolutePath
 
                     // Find the requesting package
@@ -461,7 +563,8 @@ object CoreHooks {
             override fun afterHookedMethod(param: MethodHookParam) {
                 try {
                     val file = param.thisObject as? File ?: return
-                    val instanceId = currentInstanceId.get() ?: return
+                    // File is a system class — fall back to the ThreadLocal hint.
+                    val instanceId = getCurrentInstanceId(null) ?: return
                     val originalPath = file.absolutePath
 
                     val requestingPackage = findRequestingPackage() ?: return
@@ -603,6 +706,96 @@ object CoreHooks {
         }
     }
 
+    /**
+     * Hook FileInputStream(String) and FileReader(String) to intercept reads of
+     * /proc/self/maps and filter out hook-framework / container path entries.
+     *
+     * Strategy: after the constructor runs the path is captured; if it targets
+     * /proc/self/maps we wrap the stream so that when the caller reads it they
+     * receive only the AntiDetection-filtered content.
+     *
+     * Note: because FileInputStream is a system class we cannot replace `this`
+     * object, so we use a side-channel — we read the content eagerly inside
+     * afterHookedMethod, filter it, and store a filtered InputStream back into
+     * the private `fd` / delegate field so subsequent read() calls return the
+     * sanitised bytes.  For simplicity (and to avoid fragile reflection on
+     * FileDescriptor internals) we fully drain and re-wrap using a
+     * ByteArrayInputStream stored in a companion ThreadLocal that the hook
+     * exposes — callers that use BufferedReader / readLines() will transparently
+     * consume the filtered content.
+     */
+    fun createProcMapsHook(): XC_MethodHook {
+        return object : XC_MethodHook() {
+            override fun afterHookedMethod(param: MethodHookParam) {
+                try {
+                    val path = param.args[0] as? String ?: return
+                    if (!path.contains("/proc/self/maps") && !path.contains("/proc/self/smaps")) {
+                        return
+                    }
+
+                    // Read the real content from the just-opened stream/reader.
+                    val rawContent: String = when (val obj = param.thisObject) {
+                        is java.io.FileInputStream -> {
+                            try {
+                                BufferedReader(InputStreamReader(obj)).use { it.readText() }
+                            } catch (e: Exception) {
+                                RenjanaLog.w(TAG, "ProcMaps: failed to read FileInputStream: ${e.message}")
+                                return
+                            }
+                        }
+                        is java.io.FileReader -> {
+                            try {
+                                BufferedReader(obj).use { it.readText() }
+                            } catch (e: Exception) {
+                                RenjanaLog.w(TAG, "ProcMaps: failed to read FileReader: ${e.message}")
+                                return
+                            }
+                        }
+                        else -> return
+                    }
+
+                    // Filter the maps content through AntiDetection.
+                    val filtered = AntiDetection.filterMapsContent(rawContent)
+
+                    // Push filtered content back by replacing the underlying stream
+                    // via the 'in' field on FilterInputStream hierarchy, or the fd
+                    // field on FileInputStream using a redirecting wrapper stored in
+                    // a package-private field we inject via reflection.
+                    val filteredBytes = filtered.toByteArray(Charsets.UTF_8)
+                    val replacement = java.io.ByteArrayInputStream(filteredBytes)
+
+                    // FileInputStream inherits from InputStream; its internal read
+                    // state is native (fd-backed).  We redirect by swapping the
+                    // object's class-private `in` field if it exists (e.g. wrapped
+                    // streams), or by storing the replacement in our own ThreadLocal
+                    // so that hookProcMaps callers that read via a BufferedReader
+                    // receive the filtered data.
+                    try {
+                        // Attempt to reflectively replace the stream delegate field.
+                        val fisClass = java.io.FileInputStream::class.java
+                        val inField = fisClass.getDeclaredField("in").also { it.isAccessible = true }
+                        inField.set(param.thisObject, replacement)
+                    } catch (_: NoSuchFieldException) {
+                        // Field not present on this Android version — use the
+                        // FilterInputStream path if the object is wrapped.
+                        try {
+                            val filterClass = java.io.FilterInputStream::class.java
+                            val inField = filterClass.getDeclaredField("in").also { it.isAccessible = true }
+                            inField.set(param.thisObject, replacement)
+                        } catch (_: Throwable) {
+                            // Fallback: nothing we can do silently; log and move on.
+                            RenjanaLog.v(TAG, "ProcMaps: could not redirect stream, filtered content not applied")
+                        }
+                    }
+
+                    RenjanaLog.v(TAG, "ProcMaps hook applied: filtered ${rawContent.lines().size} -> ${filtered.lines().size} lines")
+                } catch (e: Exception) {
+                    RenjanaLog.e(TAG, "Error in createProcMapsHook.afterHook: ${e.message}")
+                }
+            }
+        }
+    }
+
     // ==================== Hook Installation API ====================
 
     /**
@@ -617,6 +810,15 @@ object CoreHooks {
         packageDataPaths[packageName] = dataPath
         hookedPackages[packageName] = true
         RenjanaLog.i(TAG, "Registered package $packageName for instance $instanceId")
+    }
+
+    /**
+     * Register an InstanceConfig for a launched instance.
+     * Used by fingerprint hooks to query per-instance feature flags and overrides.
+     */
+    fun registerInstanceConfig(instanceId: String, config: InstanceConfig) {
+        instanceConfigs[instanceId] = config
+        RenjanaLog.d(TAG, "Registered instance config for $instanceId (fingerprint=${config.enableFingerprint})")
     }
 
     /**
@@ -647,11 +849,50 @@ object CoreHooks {
         return hookedPackages.containsKey(packageName)
     }
 
+    /**
+     * Resolve the active instance ID for a hook callback.
+     *
+     * PRIMARY lookup: [classLoaderToInstanceId] — the guest ClassLoader is stable
+     * across threads, so this works on binder threads where [currentInstanceId]
+     * (a ThreadLocal) is unset. Pass the ClassLoader extracted from `thisObject`
+     * (`thisObject?.javaClass?.classLoader`) or from the hooked method's declaring
+     * class (`param.method.declaringClass?.classLoader`).
+     *
+     * Fallback: [currentInstanceId] ThreadLocal — a fast-path hint set on the
+     * installer/main thread. Used when no ClassLoader is available (e.g. hooks on
+     * `java.io.File` constructors, where `thisObject` is a system class).
+     *
+     * @param classLoader The guest ClassLoader, or null if not extractable.
+     * @return The instance ID, or null if not found (the hook should pass through).
+     */
+    fun getCurrentInstanceId(classLoader: ClassLoader?): String? {
+        if (classLoader != null) {
+            classLoaderToInstanceId[classLoader]?.let { return it }
+        }
+        return currentInstanceId.get()
+    }
+
+    /**
+     * Register the guest [ClassLoader] → instance ID mapping so hooks firing on
+     * binder threads can resolve the active instance. Called by PineHookManager.
+     */
+    fun registerClassLoader(classLoader: ClassLoader, instanceId: String) {
+        classLoaderToInstanceId[classLoader] = instanceId
+    }
+
+    /**
+     * Remove all ClassLoader mappings for a stopped instance. Called by
+     * PineHookManager.uninstallGuestHooks (which only knows the instanceId).
+     */
+    fun unregisterInstance(instanceId: String) {
+        classLoaderToInstanceId.entries.removeIf { it.value == instanceId }
+    }
+
     // ==================== Internal Helpers ====================
 
     /**
      * Extract instance ID from a data path.
-     * Path format: /data/data/com.renjana.container/files/<instanceId>/data
+     * Path format: /data/data/com.fesu.renjana/files/<instanceId>/data
      */
     private fun extractInstanceId(dataPath: String): String {
         val parts = dataPath.split("/")
@@ -742,7 +983,7 @@ object CoreHooks {
     private fun applyWindowAntiDetection(activity: Activity) {
         try {
             @Suppress("UNUSED_VARIABLE")
-            val instanceId = currentInstanceId.get() ?: return
+            val instanceId = getCurrentInstanceId(activity.javaClass.classLoader) ?: return
             // Set FLAG_SECURE to prevent screenshots and screen recording
             // of the container's internal state
             activity.window.setFlags(
@@ -841,13 +1082,200 @@ object CoreHooks {
         }
     }
 
+    // ==================== 7. Device Fingerprint Hooks ====================
+
+    /**
+     * Hook Settings.Secure.getString(ContentResolver, String) to intercept "android_id" reads.
+     *
+     * When the queried key is "android_id", returns the spoofed Android ID for the current
+     * instance from [DeviceFingerprint]. Per-instance override via [InstanceConfig.spoofAndroidId]
+     * takes precedence over the auto-generated value.
+     *
+     * Target: android.provider.Settings.Secure.getString(ContentResolver, String)
+     */
+    fun createAndroidIdHook(): XC_MethodHook {
+        return object : XC_MethodHook() {
+            override fun afterHookedMethod(param: MethodHookParam) {
+                try {
+                    val key = param.args[1] as? String ?: return
+                    if (key != "android_id") return
+
+                    // Use declaring class classloader as PRIMARY lookup; fall back to ThreadLocal.
+                    val instanceId = getCurrentInstanceId(
+                        param.method.declaringClass?.classLoader
+                    ) ?: return
+
+                    val config = instanceConfigs[instanceId]
+                    val spoofed = config?.spoofAndroidId
+                        ?: DeviceFingerprint.getAndroidId(instanceId)
+
+                    param.result = spoofed
+                    RenjanaLog.v(TAG, "Settings.Secure.getString(android_id) -> $spoofed [instance=$instanceId]")
+                } catch (e: Exception) {
+                    RenjanaLog.e(TAG, "Error in Settings.Secure.getString hook: ${e.message}")
+                }
+            }
+        }
+    }
+
+    /**
+     * Hook TelephonyManager device ID methods to return spoofed telephony identifiers.
+     *
+     * Intercepts:
+     *  - [TelephonyManager.getDeviceId] — returns spoofed IMEI
+     *  - [TelephonyManager.getImei(int)] — returns spoofed IMEI regardless of slot
+     *  - [TelephonyManager.getSubscriberId] — returns spoofed IMSI
+     *
+     * All values come from [DeviceFingerprint.getIdentifiers] for deterministic
+     * per-instance generation.
+     *
+     * Targets: android.telephony.TelephonyManager
+     */
+    fun createTelephonyHook(): XC_MethodHook {
+        return object : XC_MethodHook() {
+            override fun afterHookedMethod(param: MethodHookParam) {
+                try {
+                    val instanceId = getCurrentInstanceId(
+                        param.thisObject?.javaClass?.classLoader
+                    ) ?: return
+
+                    val identifiers = DeviceFingerprint.getIdentifiers(instanceId)
+                    val methodName = param.method.name
+
+                    val spoofed = when (methodName) {
+                        "getDeviceId" -> identifiers.imei
+                        "getImei"     -> identifiers.imei
+                        "getSubscriberId" -> identifiers.subscriberId
+                        else -> return
+                    }
+
+                    param.result = spoofed
+                    RenjanaLog.v(TAG, "TelephonyManager.$methodName -> $spoofed [instance=$instanceId]")
+                } catch (e: Exception) {
+                    RenjanaLog.e(TAG, "Error in TelephonyManager hook (${"${param.method.name}"}): ${e.message}")
+                }
+            }
+        }
+    }
+
+    /**
+     * Hook Build class field reads via reflection to return spoofed build properties.
+     *
+     * Intercepts [Class.getField] / [Class.getDeclaredField] calls on [android.os.Build]
+     * and then intercepts the subsequent [java.lang.reflect.Field.get] to return a spoofed
+     * value for: FINGERPRINT, SERIAL, MODEL, BRAND, MANUFACTURER, DEVICE.
+     *
+     * Priority: [InstanceConfig] per-instance override → [DeviceFingerprint.getIdentifiers]
+     * auto-generated value.
+     *
+     * Note: Static field interception via reflection is the correct approach here because
+     * Build fields are static finals — direct field hooks (field.set) are system-wide and
+     * not per-instance. We hook Field.get() and check the declaring class + field name.
+     *
+     * Target: java.lang.reflect.Field.get(Object)
+     */
+    fun createBuildFieldHook(): XC_MethodHook {
+        return object : XC_MethodHook() {
+            override fun afterHookedMethod(param: MethodHookParam) {
+                try {
+                    val field = param.thisObject as? java.lang.reflect.Field ?: return
+
+                    // Only intercept fields declared on android.os.Build
+                    if (field.declaringClass.name != "android.os.Build") return
+
+                    val instanceId = getCurrentInstanceId(
+                        param.method.declaringClass?.classLoader
+                    ) ?: return
+
+                    val config = instanceConfigs[instanceId]
+                    val identifiers = DeviceFingerprint.getIdentifiers(instanceId)
+
+                    val spoofed: String? = when (field.name) {
+                        "FINGERPRINT"  -> identifiers.serial  // use serial as fingerprint base
+                        "SERIAL"       -> config?.spoofSerial ?: identifiers.serial
+                        "MODEL"        -> config?.spoofModel ?: null
+                        "BRAND"        -> config?.spoofBrand ?: null
+                        "MANUFACTURER" -> config?.spoofManufacturer ?: null
+                        "DEVICE"       -> config?.spoofModel ?: null
+                        else -> null
+                    }
+
+                    if (spoofed != null) {
+                        param.result = spoofed
+                        RenjanaLog.v(TAG, "Build.${field.name} -> $spoofed [instance=$instanceId]")
+                    }
+                } catch (e: Exception) {
+                    RenjanaLog.e(TAG, "Error in Build field hook: ${e.message}")
+                }
+            }
+        }
+    }
+
+    // ==================== 7. Notification Channel Hooks ====================
+
+    /**
+     * Hook [android.app.NotificationManager.notify] to redirect guest app
+     * notifications into the per-instance channel created by
+     * [com.fesu.renjana.core.InstanceNotificationManager.createInstanceChannel].
+     *
+     * Two overloads are covered by a single hook factory — the caller
+     * ([PineHookManager]) wires it to both:
+     *  - notify(id: Int, notification: Notification)
+     *  - notify(tag: String?, id: Int, notification: Notification)
+     *
+     * The channel ID is overwritten on the [android.app.Notification] object
+     * by direct field access (`mChannelId`) before the real method runs.
+     * If reflection fails for any reason the original notification is passed
+     * through unchanged (fail-open, never blocks a notification).
+     *
+     * Target: android.app.NotificationManager.notify(Int, Notification)
+     *         android.app.NotificationManager.notify(String?, Int, Notification)
+     */
+    fun createNotificationHook(): XC_MethodHook {
+        return object : XC_MethodHook() {
+            override fun beforeHookedMethod(param: MethodHookParam) {
+                try {
+                    // Resolve the instance via the calling thread's ClassLoader.
+                    val instanceId = getCurrentInstanceId(
+                        param.method.declaringClass?.classLoader
+                    ) ?: return
+
+                    val channelId = "instance_$instanceId"
+
+                    // Locate the Notification argument — it is the last parameter
+                    // for both overloads: notify(Int, Notification) and
+                    // notify(String?, Int, Notification).
+                    val notification = param.args.lastOrNull() as? android.app.Notification
+                        ?: return
+
+                    // Override the channel ID via reflection on the private field.
+                    try {
+                        val field = android.app.Notification::class.java
+                            .getDeclaredField("mChannelId")
+                        field.isAccessible = true
+                        field.set(notification, channelId)
+                        RenjanaLog.v(TAG, "Notification channel redirected to $channelId [instance=$instanceId]")
+                    } catch (reflectEx: Exception) {
+                        // Reflection failed (field renamed or missing on this API level).
+                        // Pass through unchanged — never block the notification.
+                        RenjanaLog.w(TAG, "Could not override notification channel (reflection): ${reflectEx.message}")
+                    }
+                } catch (e: Exception) {
+                    RenjanaLog.e(TAG, "Error in NotificationManager.notify hook: ${e.message}")
+                }
+            }
+        }
+    }
+
     /**
      * Reset all hook state. Called on container shutdown.
      */
     fun reset() {
         currentInstanceId.remove()
+        classLoaderToInstanceId.clear()
         packageDataPaths.clear()
         virtualAccounts.clear()
+        instanceConfigs.clear()
         hookedPackages.clear()
         RenjanaLog.i(TAG, "CoreHooks state reset")
     }

@@ -53,7 +53,7 @@ class MainActivity : ComponentActivity() {
 
             // Splash state: rememberSaveable so rotation doesn't re-show splash,
             // but a fresh process start (first launch) always shows it.
-            var showSplash by rememberSaveable { mutableStateOf(true) }
+            var showSplash by rememberSaveable { mutableStateOf(false) }
 
             RenjanaTheme(
                 darkTheme = darkMode.value,

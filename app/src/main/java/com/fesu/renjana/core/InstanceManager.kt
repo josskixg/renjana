@@ -1,6 +1,8 @@
 package com.fesu.renjana.core
 
 import android.content.Context
+import com.fesu.renjana.database.InstanceAppDao
+import com.fesu.renjana.database.InstanceAppEntity
 import com.fesu.renjana.database.InstanceDao
 import com.fesu.renjana.database.InstanceEntity
 import com.fesu.renjana.models.Instance
@@ -15,7 +17,9 @@ import java.io.File
 
 class InstanceManager(
     private val context: Context,
-    private val instanceDao: InstanceDao
+    private val instanceDao: InstanceDao,
+    private val instanceAppDao: InstanceAppDao,
+    private val notificationManager: InstanceNotificationManager = InstanceNotificationManager(context)
 ) {
     companion object {
         private const val TAG = "InstanceManager"
@@ -43,7 +47,20 @@ class InstanceManager(
         return withContext(Dispatchers.IO) {
             try {
                 val id = Utils.generateId()
-                val dataPath = File(context.filesDir, "instances/$id").apply { mkdirs() }.absolutePath
+                val baseDir = File(context.filesDir, "instances/$id")
+                baseDir.mkdirs()
+
+                // Create all required sub-directories for the virtual instance
+                val subDirs = listOf(
+                    "files", "databases", "shared_prefs", "cache",
+                    "code_cache", "no_backup", "external_files",
+                    "dex", "dex_opt", "lib"
+                )
+                for (dir in subDirs) {
+                    File(baseDir, dir).mkdirs()
+                }
+
+                val dataPath = baseDir.absolutePath
                 val now = System.currentTimeMillis()
 
                 val instance = Instance(
@@ -55,6 +72,18 @@ class InstanceManager(
                 )
                 instanceDao.insertInstance(instanceToEntity(instance))
                 RenjanaLog.i(TAG, "Created instance: $id ($packageName)")
+                // Pre-generate and cache fingerprint identifiers at creation time
+                try {
+                    val identifiers = com.fesu.renjana.hooks.DeviceFingerprint.getIdentifiers(instance.id)
+                    // Store instanceId as stable seed so fingerprint survives process restart
+                    instanceDao.updateFingerprintSeed(instance.id, instance.id)
+                    RenjanaLog.d(TAG, "Pre-generated fingerprint for instance ${instance.id}: androidId=${identifiers.androidId}")
+                } catch (e: Exception) {
+                    RenjanaLog.w(TAG, "Could not pre-generate fingerprint: ${e.message}")
+                }
+                // Create the per-instance notification channel so guest app
+                // notifications are routed to their own channel from the start.
+                notificationManager.createInstanceChannel(instance)
                 Result.success(instance)
             } catch (e: Exception) {
                 RenjanaLog.e(TAG, "Failed to create instance", e)
@@ -67,6 +96,8 @@ class InstanceManager(
         return withContext(Dispatchers.IO) {
             try {
                 val entity = instanceDao.getInstanceById(id) ?: return@withContext Result.failure(IllegalArgumentException("Instance not found"))
+                // Remove the per-instance notification channel before deleting the record.
+                notificationManager.deleteInstanceChannel(id)
                 instanceDao.deleteInstance(entity)
                 File(entity.dataPath).deleteRecursively()
                 RenjanaLog.i(TAG, "Deleted instance: $id")
@@ -215,6 +246,8 @@ class InstanceManager(
                 sensorProximity = e.sensorProximity,
                 batteryCapacityMah = e.batteryCapacityMah,
                 wifiMacPrefix = e.wifiMacPrefix,
+                instanceColor = e.instanceColor,
+                instanceEmoji = e.instanceEmoji,
             )
         )
     }
@@ -251,6 +284,95 @@ class InstanceManager(
             sensorProximity = i.config.sensorProximity,
             batteryCapacityMah = i.config.batteryCapacityMah,
             wifiMacPrefix = i.config.wifiMacPrefix,
+            instanceColor = i.config.instanceColor,
+            instanceEmoji = i.config.instanceEmoji,
         )
+    }
+
+    suspend fun updateVisualConfig(instanceId: String, color: String?, emoji: String?): Result<Unit> {
+        return withContext(Dispatchers.IO) {
+            try {
+                instanceDao.updateVisualConfig(instanceId, color, emoji)
+                RenjanaLog.i(TAG, "Updated visual config for instance $instanceId")
+                Result.success(Unit)
+            } catch (e: Exception) {
+                RenjanaLog.e(TAG, "Failed to update visual config", e)
+                Result.failure(e)
+            }
+        }
+    }
+
+    fun getAppsForInstance(instanceId: String): Flow<List<InstanceAppEntity>> {
+        return instanceAppDao.getAppsForInstance(instanceId)
+    }
+
+    suspend fun addAppToInstance(
+        instanceId: String,
+        packageName: String,
+        appName: String,
+        versionName: String = "",
+        versionCode: Int = 0,
+        apkPath: String,
+        iconPath: String? = null
+    ): Result<Unit> = withContext(Dispatchers.IO) {
+        runCatching {
+            instanceAppDao.insertApp(
+                InstanceAppEntity(
+                    instanceId = instanceId,
+                    packageName = packageName,
+                    appName = appName,
+                    versionName = versionName,
+                    versionCode = versionCode,
+                    apkPath = apkPath,
+                    iconPath = iconPath,
+                    addedAt = System.currentTimeMillis()
+                )
+            )
+            // Create per-app subdirectory within instance dataPath
+            val instance = instanceDao.getInstanceById(instanceId) ?: return@runCatching
+            val appDir = java.io.File(instance.dataPath, packageName)
+            listOf("files", "databases", "shared_prefs", "cache", "code_cache", "dex_opt")
+                .forEach { java.io.File(appDir, it).mkdirs() }
+        }.fold(
+            onSuccess = { Result.success(Unit) },
+            onFailure = { e ->
+                if (e is android.database.sqlite.SQLiteConstraintException) {
+                    Result.failure(IllegalStateException("$appName already added to this instance"))
+                } else {
+                    Result.failure(e)
+                }
+            }
+        )
+    }
+
+    suspend fun deleteAllInstances(): Result<Unit> {
+        return withContext(Dispatchers.IO) {
+            try {
+                val entities = instanceDao.getAllInstancesOnce()
+                entities.forEach { entity ->
+                    notificationManager.deleteInstanceChannel(entity.id)
+                    instanceDao.deleteInstance(entity)
+                    File(entity.dataPath).deleteRecursively()
+                }
+                RenjanaLog.i(TAG, "Deleted all instances (${entities.size})")
+                Result.success(Unit)
+            } catch (e: Exception) {
+                RenjanaLog.e(TAG, "Failed to delete all instances", e)
+                Result.failure(e)
+            }
+        }
+    }
+
+    suspend fun removeAppFromInstance(instanceId: String, packageName: String): Result<Unit> {
+        return withContext(Dispatchers.IO) {
+            try {
+                instanceAppDao.deleteAppByPkg(instanceId, packageName)
+                RenjanaLog.i(TAG, "Removed app $packageName from instance $instanceId")
+                Result.success(Unit)
+            } catch (e: Exception) {
+                RenjanaLog.e(TAG, "Failed to remove app from instance", e)
+                Result.failure(e)
+            }
+        }
     }
 }

@@ -28,11 +28,20 @@ Renjana is an Android container app that lets you clone any installed app and ru
 | 🗂️ Multi-Instance | Clone any app and run unlimited parallel instances |
 | 🔑 Per-Instance Accounts | Assign a different Google account to each instance |
 | 🔒 Isolated Storage | Each instance has its own data, cache, and shared prefs |
-| 🛡️ Anti-Detection | PackageManager hiding, stack trace filtering, env cloaking |
-| 📱 Fingerprint Spoofing | Per-instance IMEI, Android ID, Build fingerprint |
-| ✍️ Signature Spoof | APK signature virtualization to pass signature checks |
 | 🌱 No Root Required | Works on stock devices via Pine hook framework |
-| 🔌 Xposed Support | Enhanced hook support on rooted devices |
+
+---
+
+## Roadmap
+
+The following features are planned for v0.1.0:
+
+| Feature | Status | Target |
+|---|---|---|
+| 🛡️ Anti-Detection | In Progress | v0.1.0 |
+| 📱 Fingerprint Spoofing | In Progress | v0.1.0 |
+| ✍️ Signature Spoof | In Progress | v0.1.0 |
+| 🔌 Xposed Support | Planned | TBA |
 
 ---
 

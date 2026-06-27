@@ -111,26 +111,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Upcoming Features (Roadmap)
 
-### v0.2.0 (Planned)
-- [ ] Plugin system for extensibility
-- [ ] Improved performance optimization
-- [ ] Extended app compatibility
-- [ ] Better error handling and crash recovery
-- [ ] Automated testing suite
+### Future Versions
 
-### v0.3.0 (Planned)
-- [ ] Multi-user support
-- [ ] Cloud sync for instances
-- [ ] Advanced hook editor
-- [ ] Performance profiling tools
-- [ ] Documentation website
-
-### v1.0.0 (Future)
-- [ ] Production-ready stability
-- [ ] Comprehensive test coverage
-- [ ] Play Store release (if compliant)
-- [ ] Enterprise features
-- [ ] API for third-party integration
+Plans for versions beyond v0.1.0 will be announced later. Bug fixes and patches will be released as needed.
 
 ---
 

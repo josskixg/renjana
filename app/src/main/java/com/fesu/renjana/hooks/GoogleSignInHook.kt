@@ -1,5 +1,7 @@
 package com.fesu.renjana.hooks
 
+import android.accounts.Account
+import android.accounts.AccountManager
 import android.app.Activity
 import android.content.Context
 import android.content.Intent
@@ -63,9 +65,18 @@ object GoogleSignInHook {
      * @return true if at least one hook was installed successfully
      */
     fun installHooks(classLoader: ClassLoader, instanceId: String): Boolean {
+        // Auto-initialize from the singleton if not already initialized explicitly.
+        // This allows PineHookManager to call installHooks() without a prior
+        // initialize(virtualizer) call, as long as GoogleSignInVirtualizer.init()
+        // has been invoked during application startup.
         if (virtualizer == null) {
-            RenjanaLog.w(TAG, "Virtualizer not initialized, cannot install hooks")
-            return false
+            if (GoogleSignInVirtualizer.isInitialized()) {
+                virtualizer = GoogleSignInVirtualizer.get()
+                RenjanaLog.i(TAG, "Auto-initialized virtualizer from singleton")
+            } else {
+                RenjanaLog.w(TAG, "Virtualizer not initialized, cannot install hooks")
+                return false
+            }
         }
 
         var hooksInstalled = 0
@@ -97,7 +108,10 @@ object GoogleSignInHook {
         // Hook 9: CredentialManager.getCredential() (Android 14+)
         if (hookCredentialManager(classLoader, instanceId)) hooksInstalled++
 
-        RenjanaLog.i(TAG, "Installed $hooksInstalled/9 Google Sign-In hooks for instance $instanceId")
+        // Hook 10: AccountManager.getAccountsByType("com.google") (filter to assigned account)
+        if (hookAccountManagerGetAccounts(classLoader, instanceId)) hooksInstalled++
+
+        RenjanaLog.i(TAG, "Installed $hooksInstalled/10 Google Sign-In hooks for instance $instanceId")
         return hooksInstalled > 0
     }
 
@@ -120,22 +134,22 @@ object GoogleSignInHook {
                 "silentSignIn",
                 object : XC_MethodHook() {
                     override fun afterHookedMethod(param: MethodHookParam) {
-                        if (isInHook.get()) return
+                        if (isInHook.get() ?: false) return
 
                         val virt = virtualizer ?: return
-                        val instanceId = CoreHooks.currentInstanceId.get() ?: return
+                        val resolvedInstanceId = CoreHooks.currentInstanceId.get() ?: return
 
                         isInHook.set(true)
                         try {
                             // Perform silent sign-in via virtualizer
                             val task = runBlocking {
-                                virt.silentSignIn(instanceId)
+                                virt.silentSignIn(resolvedInstanceId)
                             }
 
                             // Replace the original task result
                             param.result = task
 
-                            RenjanaLog.d(TAG, "Intercepted silentSignIn() for instance $instanceId")
+                            RenjanaLog.d(TAG, "Intercepted silentSignIn() for instance $resolvedInstanceId")
                         } finally {
                             isInHook.set(false)
                         }
@@ -170,18 +184,18 @@ object GoogleSignInHook {
                 "getSignInIntent",
                 object : XC_MethodHook() {
                     override fun afterHookedMethod(param: MethodHookParam) {
-                        if (isInHook.get()) return
+                        if (isInHook.get() ?: false) return
 
                         val virt = virtualizer ?: return
-                        val instanceId = CoreHooks.currentInstanceId.get() ?: return
+                        val resolvedInstanceId = CoreHooks.currentInstanceId.get() ?: return
 
                         isInHook.set(true)
                         try {
                             // Return account picker intent instead of Google's sign-in UI
-                            val intent = virt.getSignInIntent(instanceId)
+                            val intent = virt.getSignInIntent(resolvedInstanceId)
                             param.result = intent
 
-                            RenjanaLog.d(TAG, "Intercepted getSignInIntent() for instance $instanceId")
+                            RenjanaLog.d(TAG, "Intercepted getSignInIntent() for instance $resolvedInstanceId")
                         } finally {
                             isInHook.set(false)
                         }
@@ -216,20 +230,20 @@ object GoogleSignInHook {
                 "signOut",
                 object : XC_MethodHook() {
                     override fun beforeHookedMethod(param: MethodHookParam) {
-                        if (isInHook.get()) return
+                        if (isInHook.get() ?: false) return
 
                         val virt = virtualizer ?: return
-                        val instanceId = CoreHooks.currentInstanceId.get() ?: return
+                        val resolvedInstanceId = CoreHooks.currentInstanceId.get() ?: return
 
                         isInHook.set(true)
                         try {
                             // Clear account mapping
-                            virt.removeAccountFromInstance(instanceId)
+                            virt.removeAccountFromInstance(resolvedInstanceId)
 
                             // Also clear from CoreHooks
-                            CoreHooks.virtualAccounts.remove(instanceId)
+                            CoreHooks.virtualAccounts.remove(resolvedInstanceId)
 
-                            RenjanaLog.d(TAG, "Intercepted signOut() for instance $instanceId")
+                            RenjanaLog.d(TAG, "Intercepted signOut() for instance $resolvedInstanceId")
                         } finally {
                             isInHook.set(false)
                         }
@@ -264,18 +278,18 @@ object GoogleSignInHook {
                 "revokeAccess",
                 object : XC_MethodHook() {
                     override fun beforeHookedMethod(param: MethodHookParam) {
-                        if (isInHook.get()) return
+                        if (isInHook.get() ?: false) return
 
                         val virt = virtualizer ?: return
-                        val instanceId = CoreHooks.currentInstanceId.get() ?: return
+                        val resolvedInstanceId = CoreHooks.currentInstanceId.get() ?: return
 
                         isInHook.set(true)
                         try {
-                            // Clear account mapping and tokens
-                            virt.removeAccountFromInstance(instanceId)
-                            CoreHooks.virtualAccounts.remove(instanceId)
+                            // Clear account mapping and revoke tokens
+                            virt.removeAccountFromInstance(resolvedInstanceId)
+                            CoreHooks.virtualAccounts.remove(resolvedInstanceId)
 
-                            RenjanaLog.d(TAG, "Intercepted revokeAccess() for instance $instanceId")
+                            RenjanaLog.d(TAG, "Intercepted revokeAccess() for instance $resolvedInstanceId")
                         } finally {
                             isInHook.set(false)
                         }
@@ -311,10 +325,10 @@ object GoogleSignInHook {
                 Intent::class.java,
                 object : XC_MethodHook() {
                     override fun afterHookedMethod(param: MethodHookParam) {
-                        if (isInHook.get()) return
+                        if (isInHook.get() ?: false) return
 
                         val virt = virtualizer ?: return
-                        val instanceId = CoreHooks.currentInstanceId.get() ?: return
+                        val resolvedInstanceId = CoreHooks.currentInstanceId.get() ?: return
                         val intent = param.args[0] as? Intent ?: return
 
                         isInHook.set(true)
@@ -328,30 +342,32 @@ object GoogleSignInHook {
                                 // User selected an account in the picker
                                 val task = runBlocking {
                                     virt.handleAccountPickerResult(
-                                        instanceId,
+                                        resolvedInstanceId,
                                         Activity.RESULT_OK,
                                         intent
                                     )
                                 }
 
                                 // Get the account from the task
-                                if (task.isSuccessful) {
-                                    param.result = task.result
-                                    RenjanaLog.d(TAG, "Intercepted getSignedInAccountFromIntent() for instance $instanceId")
+                                val taskIsSuccessful1 = runCatching { task?.javaClass?.getMethod("isSuccessful")?.invoke(task) as? Boolean }.getOrNull() ?: false
+                                if (taskIsSuccessful1) {
+                                    param.result = runCatching { task?.javaClass?.getMethod("getResult")?.invoke(task) }.getOrNull()
+                                    RenjanaLog.d(TAG, "Intercepted getSignedInAccountFromIntent() for instance $resolvedInstanceId")
                                 }
                             } else {
                                 // No account selected, try silent sign-in
                                 val account = runBlocking {
-                                    virt.getInstanceAccount(instanceId)
+                                    virt.getInstanceAccount(resolvedInstanceId)
                                 }
 
                                 if (account != null) {
                                     // Return cached account
                                     val task = runBlocking {
-                                        virt.silentSignIn(instanceId)
+                                        virt.silentSignIn(resolvedInstanceId)
                                     }
-                                    if (task.isSuccessful) {
-                                        param.result = task.result
+                                    val taskIsSuccessful2 = runCatching { task?.javaClass?.getMethod("isSuccessful")?.invoke(task) as? Boolean }.getOrNull() ?: false
+                                    if (taskIsSuccessful2) {
+                                        param.result = runCatching { task?.javaClass?.getMethod("getResult")?.invoke(task) }.getOrNull()
                                     }
                                 }
                             }
@@ -390,20 +406,21 @@ object GoogleSignInHook {
                 Context::class.java,
                 object : XC_MethodHook() {
                     override fun afterHookedMethod(param: MethodHookParam) {
-                        if (isInHook.get()) return
+                        if (isInHook.get() ?: false) return
 
                         val virt = virtualizer ?: return
-                        val instanceId = CoreHooks.currentInstanceId.get() ?: return
+                        val resolvedInstanceId = CoreHooks.currentInstanceId.get() ?: return
 
                         isInHook.set(true)
                         try {
                             val task = runBlocking {
-                                virt.silentSignIn(instanceId)
+                                virt.silentSignIn(resolvedInstanceId)
                             }
 
-                            if (task.isSuccessful) {
-                                param.result = task.result
-                                RenjanaLog.d(TAG, "Intercepted getLastSignedInAccount() for instance $instanceId")
+                            val taskIsSuccessful3 = runCatching { task?.javaClass?.getMethod("isSuccessful")?.invoke(task) as? Boolean }.getOrNull() ?: false
+                            if (taskIsSuccessful3) {
+                                param.result = runCatching { task?.javaClass?.getMethod("getResult")?.invoke(task) }.getOrNull()
+                                RenjanaLog.d(TAG, "Intercepted getLastSignedInAccount() for instance $resolvedInstanceId")
                             } else {
                                 param.result = null
                             }
@@ -439,10 +456,10 @@ object GoogleSignInHook {
                 Int::class.javaPrimitiveType,
                 object : XC_MethodHook() {
                     override fun beforeHookedMethod(param: MethodHookParam) {
-                        if (isInHook.get()) return
+                        if (isInHook.get() ?: false) return
 
                         val virt = virtualizer ?: return
-                        val instanceId = CoreHooks.currentInstanceId.get() ?: return
+                        val resolvedInstanceId = CoreHooks.currentInstanceId.get() ?: return
                         val intent = param.args[0] as? Intent ?: return
                         val requestCode = param.args[1] as Int
 
@@ -451,14 +468,14 @@ object GoogleSignInHook {
                             isInHook.set(true)
                             try {
                                 // Get account picker intent
-                                val pickerIntent = virt.getSignInIntent(instanceId).apply {
+                                val pickerIntent = virt.getSignInIntent(resolvedInstanceId).apply {
                                     putExtra(GoogleSignInVirtualizer.EXTRA_REQUEST_CODE, requestCode)
                                 }
 
                                 // Replace the intent
                                 param.args[0] = pickerIntent
 
-                                RenjanaLog.d(TAG, "Intercepted sign-in intent for instance $instanceId")
+                                RenjanaLog.d(TAG, "Intercepted sign-in intent for instance $resolvedInstanceId")
                             } finally {
                                 isInHook.set(false)
                             }
@@ -508,18 +525,18 @@ object GoogleSignInHook {
                 String::class.java,
                 object : XC_MethodHook() {
                     override fun beforeHookedMethod(param: MethodHookParam) {
-                        if (isInHook.get()) return
+                        if (isInHook.get() ?: false) return
 
                         val virt = virtualizer ?: return
-                        val instanceId = CoreHooks.currentInstanceId.get() ?: return
+                        val resolvedInstanceId = CoreHooks.currentInstanceId.get() ?: return
                         val serverClientId = param.args[0] as? String ?: return
 
                         isInHook.set(true)
                         try {
                             // Store server client ID for token validation
-                            virt.setServerClientId(instanceId, serverClientId)
+                            virt.setServerClientId(resolvedInstanceId, serverClientId)
 
-                            RenjanaLog.d(TAG, "Captured server client ID for instance $instanceId: $serverClientId")
+                            RenjanaLog.d(TAG, "Captured server client ID for instance $resolvedInstanceId: $serverClientId")
                         } finally {
                             isInHook.set(false)
                         }
@@ -561,10 +578,10 @@ object GoogleSignInHook {
                 getCredentialRequestClass,
                 object : XC_MethodHook() {
                     override fun afterHookedMethod(param: MethodHookParam) {
-                        if (isInHook.get()) return
+                        if (isInHook.get() ?: false) return
 
                         val virt = virtualizer ?: return
-                        val instanceId = CoreHooks.currentInstanceId.get() ?: return
+                        val resolvedInstanceId = CoreHooks.currentInstanceId.get() ?: return
                         val request = param.args[1] ?: return
 
                         isInHook.set(true)
@@ -573,20 +590,25 @@ object GoogleSignInHook {
                             if (hasGoogleCredentialOption(request, classLoader)) {
                                 // Perform silent sign-in to get account
                                 val task = runBlocking {
-                                    virt.silentSignIn(instanceId)
+                                    virt.silentSignIn(resolvedInstanceId)
                                 }
 
-                                if (task.isSuccessful) {
-                                    val account = task.result
+                                val isSuccessful = task?.let {
+                                    try { it.javaClass.getMethod("isSuccessful").invoke(it) as? Boolean } catch (_: Exception) { null }
+                                } ?: false
+                                if (isSuccessful) {
+                                    val account = task?.let {
+                                        try { it.javaClass.getMethod("getResult").invoke(it) } catch (_: Exception) { null }
+                                    }
 
                                     // Create synthetic GoogleIdTokenCredential
-                                    val credential = createVirtualCredential(account, classLoader)
+                                    val credential = account?.let { createVirtualCredential(it, classLoader) }
                                     if (credential != null) {
                                         // Wrap in GetCredentialResponse
                                         val response = wrapInGetCredentialResponse(credential, classLoader)
                                         if (response != null) {
                                             param.result = response
-                                            RenjanaLog.d(TAG, "Intercepted CredentialManager.getCredential() for instance $instanceId")
+                                            RenjanaLog.d(TAG, "Intercepted CredentialManager.getCredential() for instance $resolvedInstanceId")
                                         }
                                     }
                                 }
@@ -684,6 +706,77 @@ object GoogleSignInHook {
         }
     }
 
+    // ==================== Hook 10: AccountManager.getAccountsByType ====================
+
+    /**
+     * Hook AccountManager.getAccountsByType() to filter Google accounts
+     * down to only the account assigned to the current container instance.
+     *
+     * Original signature: Account[] getAccountsByType(String type)
+     *
+     * When a guest app queries for "com.google" accounts, it should only see
+     * the account that was explicitly assigned to its instance — not every
+     * Google account on the device. This prevents cross-instance account
+     * leakage.
+     */
+    private fun hookAccountManagerGetAccounts(classLoader: ClassLoader, instanceId: String): Boolean {
+        return try {
+            val accountManagerClass = XposedHelpers.findClass(
+                "android.accounts.AccountManager",
+                classLoader
+            )
+
+            XposedHelpers.findAndHookMethod(
+                accountManagerClass,
+                "getAccountsByType",
+                String::class.java,
+                object : XC_MethodHook() {
+                    override fun afterHookedMethod(param: MethodHookParam) {
+                        if (isInHook.get() ?: false) return
+
+                        val type = param.args[0] as? String ?: return
+                        // Only intercept Google account queries
+                        if (type != "com.google") return
+
+                        val virt = virtualizer ?: return
+                        val currentInstanceId = CoreHooks.currentInstanceId.get() ?: return
+
+                        isInHook.set(true)
+                        try {
+                            // Get the account assigned to this instance
+                            val assignedAccount = runBlocking {
+                                virt.getInstanceAccount(currentInstanceId)
+                            }
+
+                            if (assignedAccount == null) {
+                                // No account assigned — guest sees zero Google accounts
+                                param.result = emptyArray<Account>()
+                                RenjanaLog.d(TAG, "Filtered getAccountsByType(\"com.google\") to empty (no account assigned to instance $currentInstanceId)")
+                            } else {
+                                // Filter the result to only include the assigned account's email
+                                val originalAccounts = param.result as? Array<Account> ?: emptyArray()
+                                val filtered = originalAccounts.filter { account ->
+                                    account.name == assignedAccount.email
+                                }.toTypedArray()
+
+                                param.result = filtered
+                                RenjanaLog.d(TAG, "Filtered getAccountsByType(\"com.google\") to ${filtered.size} account(s) for instance $currentInstanceId (assigned: ${assignedAccount.email})")
+                            }
+                        } finally {
+                            isInHook.set(false)
+                        }
+                    }
+                }
+            )
+
+            RenjanaLog.d(TAG, "Hooked AccountManager.getAccountsByType()")
+            true
+        } catch (e: Throwable) {
+            RenjanaLog.w(TAG, "Failed to hook AccountManager.getAccountsByType: ${e.message}")
+            false
+        }
+    }
+
     // ==================== Utility Methods ====================
 
     /**
@@ -698,6 +791,8 @@ object GoogleSignInHook {
 
     /**
      * Check if hooks are initialized.
+     * Returns true if a virtualizer is available (either explicitly injected
+     * or auto-initialized from the GoogleSignInVirtualizer singleton).
      */
-    fun isInitialized(): Boolean = virtualizer != null
+    fun isInitialized(): Boolean = virtualizer != null || GoogleSignInVirtualizer.isInitialized()
 }

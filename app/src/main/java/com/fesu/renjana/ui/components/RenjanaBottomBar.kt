@@ -40,18 +40,20 @@ fun RenjanaBottomBar(
         color = MaterialTheme.colorScheme.surface,
         tonalElevation = 2.dp,
         shadowElevation = 12.dp,
-        modifier = Modifier.fillMaxWidth()
+        modifier = Modifier
+            .fillMaxWidth()
+            .navigationBarsPadding()
     ) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .windowInsetsPadding(WindowInsets.navigationBars)
                 .padding(horizontal = 4.dp, vertical = 6.dp),
             horizontalArrangement = Arrangement.SpaceEvenly,
             verticalAlignment = Alignment.CenterVertically
         ) {
             items.forEach { item ->
-                val isSelected = currentRoute == item.route
+                val isSelected = currentRoute != null &&
+                    (currentRoute == item.route || currentRoute.startsWith("${item.route}?"))
                 val interactionSource = remember { MutableInteractionSource() }
                 val isPressed by interactionSource.collectIsPressedAsState()
 

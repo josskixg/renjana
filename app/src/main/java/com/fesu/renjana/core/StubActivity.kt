@@ -1,6 +1,7 @@
 package com.fesu.renjana.core
 
 import android.app.Activity
+import android.content.Context
 import android.content.Intent
 import android.content.res.AssetManager
 import android.content.res.Configuration
@@ -11,9 +12,11 @@ import android.view.Menu
 import android.view.MenuItem
 import android.view.MotionEvent
 import android.view.WindowManager
-import com.fesu.renjana.RenjanaApplication
+import com.fesu.renjana.hooks.CoreHooks
+import com.fesu.renjana.hooks.PineHookManager
 import com.fesu.renjana.models.Instance
 import com.fesu.renjana.utils.RenjanaLog
+import com.fesu.renjana.virtual.VirtualContext
 import java.lang.reflect.Method
 
 /**
@@ -86,6 +89,43 @@ abstract class StubActivity : Activity() {
     private var onWindowFocusChangedMethod: Method? = null
 
     // ──────────────────────────────────────────────
+    // Lifecycle: attachBaseContext
+    // ──────────────────────────────────────────────
+
+    /**
+     * Wrap the base Context with a [VirtualContext] that redirects file/data
+     * operations to the instance's isolated data path.
+     *
+     * Called by the Android framework before [onCreate]. The launching Intent
+     * (set by [ActivityStubManager]) is already available here, so we extract
+     * the instance ID and resolve the instance to obtain its dataPath.
+     *
+     * If the instance ID is missing or the instance cannot be resolved, we fall
+     * back to the un-wrapped base context (the stub will finish() in onCreate).
+     */
+    override fun attachBaseContext(newBase: Context?) {
+        val instanceId = intent?.getStringExtra(EXTRA_INSTANCE_ID)
+        if (instanceId != null && newBase != null) {
+            // Resolve dataPath from the in-memory cache populated by InstanceLauncher.
+            // This avoids runBlocking on the main thread (ANR risk). Falls back to the
+            // un-wrapped base context if the instance is not cached (e.g. process restart).
+            val dataPath = ActivityStubManager.getDataPathForInstance(instanceId)
+            if (dataPath != null) {
+                try {
+                    super.attachBaseContext(VirtualContext(newBase, dataPath))
+                    RenjanaLog.d(TAG, "attachBaseContext: wrapped with VirtualContext for instance $instanceId")
+                    return
+                } catch (e: Exception) {
+                    RenjanaLog.w(TAG, "attachBaseContext: failed to wrap context: ${e.message}")
+                }
+            } else {
+                RenjanaLog.w(TAG, "attachBaseContext: no cached dataPath for instance $instanceId, using base context")
+            }
+        }
+        super.attachBaseContext(newBase)
+    }
+
+    // ──────────────────────────────────────────────
     // Lifecycle: onCreate
     // ──────────────────────────────────────────────
 
@@ -109,15 +149,18 @@ abstract class StubActivity : Activity() {
         ActivityStubManager.onStubOccupied(instanceId, getStubIndex(), guestClassName)
 
         try {
-            // Resolve the instance to get data path
-            val instance: Instance? = kotlinx.coroutines.runBlocking {
-                RenjanaApplication.get().instanceManager.getInstanceById(instanceId)
-            }
+            // Resolve the instance from the in-memory cache (populated by InstanceLauncher
+            // before launch) to avoid runBlocking on the main thread.
+            val instance: Instance? = ActivityStubManager.getCachedInstance(instanceId)
             if (instance == null) {
-                RenjanaLog.e(TAG, "Instance $instanceId not found")
+                RenjanaLog.e(TAG, "Instance $instanceId not found in cache")
                 finish()
                 return
             }
+
+            // Mark this instance as active on the current thread so hooks know
+            // which virtual context to use (file redirects, GMS spoofing, etc.)
+            CoreHooks.currentInstanceId.set(instanceId)
 
             // Create isolated classloader for this instance
             val optimizedDir = java.io.File(instance.dataPath, "dex_opt")
@@ -127,6 +170,24 @@ abstract class StubActivity : Activity() {
                 optimizedDir = optimizedDir,
                 parent = classLoader
             )
+
+            // Verify Pine guest hooks are installed (InstanceLauncher should have
+            // done this before launch, but this is idempotent and acts as a safety net)
+            if (PineHookManager.isAvailable()) {
+                val hooksOk = PineHookManager.installGuestHooks(
+                    instance.packageName,
+                    virtualClassLoader!!,
+                    instanceId,
+                    instance.dataPath,
+                    apkPath,
+                    instance = instance
+                )
+                if (!hooksOk) {
+                    RenjanaLog.w(TAG, "Pine guest hooks not installed for ${instance.packageName}, isolation may be incomplete")
+                }
+            } else {
+                RenjanaLog.w(TAG, "Pine unavailable — guest running without hook-based isolation")
+            }
 
             // Load and instantiate guest Activity
             val guestClass = virtualClassLoader!!.loadGuestClass(guestClassName)
@@ -166,7 +227,8 @@ abstract class StubActivity : Activity() {
             injectGuestContext(guest)
         } catch (e: Exception) {
             RenjanaLog.w(TAG, "Guest attach failed (non-fatal): ${e.message}")
-            injectGuestContext(guest)
+            finish()
+            return
         }
     }
 
@@ -197,23 +259,68 @@ abstract class StubActivity : Activity() {
             instrField.isAccessible = true
             instrField.set(guest, android.app.Instrumentation())
 
-            // Set mToken
-            val tokenField = Activity::class.java.getDeclaredField("mToken")
-            tokenField.isAccessible = true
-            // Use host's token so the guest renders in the same window
-            val hostTokenField = Activity::class.java.getDeclaredField("mToken")
-            hostTokenField.isAccessible = true
-            tokenField.set(guest, hostTokenField.get(this))
+            // FIX 1: Inject mMainThread from host so guest runs on the correct ActivityThread
+            try {
+                val mainThreadField = Activity::class.java.getDeclaredField("mMainThread")
+                mainThreadField.isAccessible = true
+                mainThreadField.set(guest, mainThreadField.get(this))
+                RenjanaLog.d(TAG, "mMainThread injected into guest")
+            } catch (e: Exception) {
+                RenjanaLog.w(TAG, "Could not inject mMainThread: ${e.message}")
+            }
+
+            // FIX 2: Inject mUiThread so guest's runOnUiThread() works correctly
+            try {
+                val uiThreadField = Activity::class.java.getDeclaredField("mUiThread")
+                uiThreadField.isAccessible = true
+                uiThreadField.set(guest, Thread.currentThread())
+                RenjanaLog.d(TAG, "mUiThread injected into guest")
+            } catch (e: Exception) {
+                RenjanaLog.w(TAG, "Could not inject mUiThread: ${e.message}")
+            }
+
+            // FIX 5: Set mToken — copy FROM host (this) TO guest (was a no-op self-copy before)
+            try {
+                val tokenField = Activity::class.java.getDeclaredField("mToken")
+                tokenField.isAccessible = true
+                tokenField.set(guest, tokenField.get(this))
+                RenjanaLog.d(TAG, "mToken injected into guest")
+            } catch (e: Exception) {
+                RenjanaLog.w(TAG, "Could not inject mToken: ${e.message}")
+            }
 
             // Set mWindowManager
             val wmField = Activity::class.java.getDeclaredField("mWindowManager")
             wmField.isAccessible = true
             wmField.set(guest, windowManager)
 
-            // Set mWindow
-            val windowField = Activity::class.java.getDeclaredField("mWindow")
-            windowField.isAccessible = true
-            windowField.set(guest, window)
+            // FIX 3: Create a new PhoneWindow for the guest instead of sharing the host's.
+            // Sharing causes DecorView to be built with the host context, which makes
+            // AppCompatDelegateImpl.createSubDecor() throw "View must not be null".
+            try {
+                val phoneWindowClass = Class.forName("com.android.internal.policy.PhoneWindow")
+                val ctor = phoneWindowClass.getDeclaredConstructor(android.content.Context::class.java)
+                ctor.isAccessible = true
+                val guestWindow = ctor.newInstance(guest) as android.view.Window
+                // Set windowManager via reflection — Window.windowManager is a val
+                try {
+                    val wmField = android.view.Window::class.java.getDeclaredField("mWindowManager")
+                    wmField.isAccessible = true
+                    wmField.set(guestWindow, windowManager)
+                } catch (wmEx: Exception) {
+                    RenjanaLog.w(TAG, "Could not set windowManager on guest PhoneWindow: ${wmEx.message}")
+                }
+                val windowField = Activity::class.java.getDeclaredField("mWindow")
+                windowField.isAccessible = true
+                windowField.set(guest, guestWindow)
+                RenjanaLog.d(TAG, "New PhoneWindow created for guest")
+            } catch (e: Exception) {
+                RenjanaLog.w(TAG, "Could not create guest PhoneWindow, sharing host window: ${e.message}")
+                // Fall back to sharing host window
+                val windowField = Activity::class.java.getDeclaredField("mWindow")
+                windowField.isAccessible = true
+                windowField.set(guest, window)
+            }
 
             // Set mCalled = true so the guest doesn't throw SuperNotCalledException
             val calledField = Activity::class.java.getDeclaredField("mCalled")

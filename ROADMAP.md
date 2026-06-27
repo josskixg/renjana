@@ -262,72 +262,52 @@ System property "ro.product.model" matches container
 
 ## Implementation Roadmap
 
-### Phase 1: MVP (Weeks 1-3)
-**Goal**: Basic container with multi-account support
+### Phase 1: v0.1.0 — Full Isolation Stack (Weeks 1-7)
+**Goal**: Working container with isolated storage, per-instance Google accounts, signature spoof, fingerprint spoof, and anti-detection stack.
 
 **Week 1: Core Runtime**
-- [ ] Setup Android project (Gradle, Kotlin)
-- [ ] APK parser & DEX loader
-- [ ] Basic Activity lifecycle hooks
-- [ ] Simple app launch in container
+- [ ] Bundle Pine hook framework in APK
+- [ ] Fix launch path: StubActivity default (not `getLaunchIntentForPackage`)
+- [ ] Hook `Activity.attach()` via `Instrumentation.newActivity()`
+- [ ] Fix `ActivityStubManager.STUB_PACKAGE` bug
 
-**Week 2: Virtual Environment**
-- [ ] Virtual file system
-- [ ] SharedPreferences isolation
-- [ ] Database isolation
-- [ ] Context virtualization
+**Week 2: Storage Isolation**
+- [ ] ContextWrapper: override `getFilesDir/getCacheDir/getDatabasePath/getSharedPreferences`
+- [ ] Pine hooks for Application-level storage calls
+- [ ] Per-instance data directory structure
 
-**Week 3: GMS + Multi-Instance**
-- [ ] Google account manager
-- [ ] GMS hook for Google Sign-In
-- [ ] Instance manager (create/clone/delete)
-- [ ] Basic UI (instance list, launch)
+**Week 3: GMS Isolation**
+- [ ] Wire `GoogleSignInVirtualizer` (account assignment per instance)
+- [ ] Hook `GoogleSignInClient.silentSignIn/getLastSignedInAccount`
+- [ ] Hook `AccountManager.getAccountsByType("com.google")`
+- [ ] Implement `AccountsViewModel.loadAccounts()` + `assignAccountToInstance()`
 
-**Deliverable**: Can clone an app, assign different Google accounts, launch separately
+**Week 4: UI Polish**
+- [ ] Fix 4 screen double-padding (Home, Apps, Settings, Accounts)
+- [ ] Responsive layout (landscape/tablet)
 
----
+**Week 5: Anti-Detection**
+- [ ] Signature spoofing (hook `PackageManager.getPackageInfo()`)
+- [ ] Environment cloaking (hide container paths, filter /proc/maps)
+- [ ] Detection evasion (block Frida port scans, SafetyNet interception)
 
-### Phase 2: Hardening (Weeks 4-6)
-**Goal**: Stability & anti-detection
+**Week 6: Fingerprint Spoof**
+- [ ] Per-instance ANDROID_ID, Build props randomization
+- [ ] Fingerprint seed → stable identity per instance
+- [ ] Canvas fingerprint, sensor spoofing
 
-**Week 4: Anti-Detection**
-- [ ] Signature spoofing
-- [ ] Environment cloaking
-- [ ] Detection evasion
-
-**Week 5: Hook Framework**
-- [ ] Xposed integration (root mode)
-- [ ] Pine/Whale integration (non-root)
-- [ ] Hook stability improvements
-
-**Week 6: Polish**
-- [ ] Error handling
+**Week 7: Hardening**
+- [ ] Error handling & crash recovery
 - [ ] Performance optimization
+
+**Deliverable**: 2 instances of same app → each has fresh storage, own Google account, unique device fingerprint, passes signature checks. No leaked login, no detection.
 - [ ] Memory management
-- [ ] Crash recovery
 
 ---
 
-### Phase 3: Production (Weeks 7-9)
-**Goal**: User-ready release
+### Future Versions
 
-**Week 7: Advanced Features**
-- [ ] Backup/restore instances
-- [ ] Instance sync across devices
-- [ ] Custom hooks per app
-- [ ] Plugin system
-
-**Week 8: UI/UX**
-- [ ] Complete UI redesign
-- [ ] Onboarding flow
-- [ ] Documentation
-- [ ] FAQ & troubleshooting
-
-**Week 9: Testing & Release**
-- [ ] Beta testing program
-- [ ] Bug fixes
-- [ ] Play Store preparation (or alternative distribution)
-- [ ] Marketing materials
+Plans for versions beyond v0.1.0 will be announced later. Bug fixes and patches will be released as needed.
 
 ---
 
@@ -493,19 +473,19 @@ dependencies {
 
 ## Success Metrics
 
-**Phase 1 (MVP)**:
-- Can launch WhatsApp clone with 2 different accounts
-- Can launch Instagram clone with 3 different accounts
+**Phase 1 (v0.1.0 — Storage + GMS)**:
+- Can launch same app in 2 instances → each has fresh storage (no leaked login)
+- Google account isolation works (assigned account returned to guest)
 - Works on Android 10+ (API 29+)
-- < 5% crash rate
+- < 10% crash rate (Pine hooks on various devices)
 
-**Phase 2 (Hardening)**:
+**Phase 2 (v0.2.0 — Anti-Detection)**:
 - Bypasses detection in top 20 apps
-- < 2% crash rate
+- < 5% crash rate
 - Memory usage < 200MB per instance
 - Launch time < 3 seconds
 
-**Phase 3 (Production)**:
+**Phase 3 (v0.3.0 — Production)**:
 - 1000+ beta users
 - 4.0+ rating
 - < 1% crash rate

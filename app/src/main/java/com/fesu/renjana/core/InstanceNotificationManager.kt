@@ -9,8 +9,10 @@ import android.content.Intent
 import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.drawable.Drawable
+import android.os.Build
 import androidx.core.app.NotificationCompat
 import com.fesu.renjana.R
+import com.fesu.renjana.models.Instance
 import com.fesu.renjana.utils.RenjanaLog
 
 /**
@@ -57,6 +59,50 @@ class InstanceNotificationManager(private val context: Context) {
         }
         notificationManager.createNotificationChannel(channel)
         RenjanaLog.d(TAG, "Notification channel created")
+    }
+
+    // ── Per-instance channel management ──────────────────────────────────
+
+    /**
+     * Returns the notification channel ID for a given instance.
+     * Format: "instance_<instanceId>"
+     */
+    fun getChannelId(instanceId: String): String = "instance_$instanceId"
+
+    /**
+     * Creates a dedicated NotificationChannel for [instance] so that guest
+     * app notifications appear under their own channel instead of the
+     * shared container channel.
+     *
+     * Safe to call multiple times — Android ignores duplicate channel creation
+     * when the ID already exists and the attributes haven't changed.
+     *
+     * Requires API 26+; no-op on older devices.
+     */
+    fun createInstanceChannel(instance: Instance) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
+        val channelId = getChannelId(instance.id)
+        val channelName = "${instance.appName} (${instance.packageName})"
+        val channel = NotificationChannel(
+            channelId,
+            channelName,
+            NotificationManager.IMPORTANCE_DEFAULT
+        ).apply {
+            description = "Notifications from ${instance.appName} running inside Renjana"
+        }
+        notificationManager.createNotificationChannel(channel)
+        RenjanaLog.d(TAG, "Per-instance channel created: $channelId ($channelName)")
+    }
+
+    /**
+     * Removes the per-instance notification channel when the instance is deleted.
+     * Requires API 26+; no-op on older devices.
+     */
+    fun deleteInstanceChannel(instanceId: String) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
+        val channelId = getChannelId(instanceId)
+        notificationManager.deleteNotificationChannel(channelId)
+        RenjanaLog.d(TAG, "Per-instance channel deleted: $channelId")
     }
 
     /**

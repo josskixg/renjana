@@ -3,6 +3,7 @@ package com.fesu.renjana.core
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
+import com.fesu.renjana.models.Instance
 import com.fesu.renjana.utils.RenjanaLog
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.ConcurrentLinkedDeque
@@ -29,7 +30,7 @@ object ActivityStubManager {
 
     private const val TAG = "ActivityStubManager"
     private const val TOTAL_STUBS = 10
-    private const val STUB_PACKAGE = "com.renjana.container"
+    private const val STUB_PACKAGE = "com.fesu.renjana"
 
     // ─── Stub pool state ───────────────────────────────────
 
@@ -48,6 +49,46 @@ object ActivityStubManager {
 
     /** "instanceId:stubIndex:stubRequestCode" → original guest request code */
     private val requestCodeMap = ConcurrentHashMap<String, Int>()
+
+    // ─── Instance cache (avoids runBlocking on main thread) ──
+
+    /**
+     * In-memory cache of recently-launched [Instance] objects, keyed by instance ID.
+     *
+     * Populated by [InstanceLauncher.launchInstance] right before it starts the
+     * StubActivity, so that [StubActivity.attachBaseContext] / [onCreate] can resolve
+     * the instance's `dataPath` / `packageName` synchronously without a `runBlocking`
+     * database lookup on the main thread (which would risk an ANR).
+     */
+    private val instanceCache = ConcurrentHashMap<String, Instance>()
+
+    /**
+     * Cache [instance] so a subsequently-launched [StubActivity] can resolve it
+     * without touching the database. Idempotent; safe to call repeatedly.
+     */
+    fun cacheInstance(instance: Instance) {
+        instanceCache[instance.id] = instance
+    }
+
+    /**
+     * @return the cached [Instance] for [instanceId], or `null` if not cached
+     *         (e.g. process was restarted and the stub is being recreated).
+     */
+    fun getCachedInstance(instanceId: String): Instance? = instanceCache[instanceId]
+
+    /**
+     * @return the cached `dataPath` for [instanceId], or `null` if not cached.
+     *         Convenience wrapper over [getCachedInstance] for [StubActivity.attachBaseContext].
+     */
+    fun getDataPathForInstance(instanceId: String): String? = instanceCache[instanceId]?.dataPath
+
+    /**
+     * Remove [instanceId] from the instance cache. Call when an instance is stopped
+     * to avoid holding stale references.
+     */
+    fun clearInstanceCache(instanceId: String) {
+        instanceCache.remove(instanceId)
+    }
 
     // ─── StubActivity component name cache ──────────────────
 

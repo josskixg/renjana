@@ -32,7 +32,7 @@ import java.util.concurrent.ConcurrentHashMap
 object IntentHook {
 
     private const val TAG = "IntentHook"
-    private const val CONTAINER_PACKAGE = "com.renjana.container"
+    private const val CONTAINER_PACKAGE = "com.fesu.renjana"
 
     /**
      * Tracks which hooks have been installed to avoid duplicates.

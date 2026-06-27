@@ -34,7 +34,7 @@ import java.lang.reflect.Method
 object ActivityStarterHook {
 
     private const val TAG = "ActivityStarterHook"
-    private const val CONTAINER_PACKAGE = "com.renjana.container"
+    private const val CONTAINER_PACKAGE = "com.fesu.renjana"
 
     /** Maps instanceId → apkPath (cached to avoid repeated DB lookups) */
     private val apkPathCache = mutableMapOf<String, String>()
@@ -94,10 +94,23 @@ object ActivityStarterHook {
             return false
         }
 
-        // Don't intercept implicit intents (no component specified) — let Android handle them
+        // Don't intercept implicit intents (no component specified) — let Android handle them,
+        // EXCEPT for deep links whose scheme belongs to a registered virtual instance.
         if (targetComponent == null) {
             val action = originalIntent.action
-            if (action != null && action != Intent.ACTION_MAIN) {
+            val scheme = originalIntent.data?.scheme
+            val isDeepLink = (action == Intent.ACTION_VIEW) && scheme != null
+            if (isDeepLink) {
+                // If scheme is registered to a virtual package, let the router handle it
+                val router = RenjanaApplication.get().intentRouter
+                if (router.hasRegisteredScheme(scheme!!)) {
+                    RenjanaLog.d(TAG, "Deep link with registered scheme '$scheme' — routing through Renjana")
+                    // Fall through: do NOT return false, let normal stub routing continue
+                } else {
+                    RenjanaLog.d(TAG, "Deep link with unknown scheme '$scheme' — passing to OS")
+                    return false
+                }
+            } else if (action != null && action != Intent.ACTION_MAIN) {
                 RenjanaLog.d(TAG, "Skipping implicit intent: action=$action")
                 return false
             }

@@ -25,7 +25,7 @@ import java.util.concurrent.ConcurrentHashMap
  */
 object ResourcesHook {
     private const val TAG = "ResourcesHook"
-    private const val CONTAINER_PACKAGE = "com.renjana.container"
+    private const val CONTAINER_PACKAGE = "com.fesu.renjana"
 
     /**
      * Tracks which instance ↔ classloader combinations have hooks installed

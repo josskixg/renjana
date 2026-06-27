@@ -3,7 +3,6 @@ package com.fesu.renjana.ui.screens
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.layout.WindowInsets
-import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
@@ -20,31 +19,66 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.fesu.renjana.ui.components.EmptyStateIllustration
+import com.fesu.renjana.ui.components.ShimmerBox
 import com.fesu.renjana.ui.components.StaggeredEntrance
 import com.fesu.renjana.ui.viewmodels.AccountsViewModel
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun AccountsScreen(viewModel: AccountsViewModel = androidx.lifecycle.viewmodel.compose.viewModel()) {
     val accounts by viewModel.accounts.collectAsState()
+    val isLoading by viewModel.isLoading.collectAsState()
 
+    Scaffold(
+        topBar = {
+            TopAppBar(
+                title = { Text("Accounts", fontWeight = FontWeight.Bold) },
+                actions = {
+                    IconButton(onClick = { /* add account */ }) {
+                        Icon(Icons.Filled.Add, contentDescription = "Add account")
+                    }
+                }
+            )
+        },
+        containerColor = MaterialTheme.colorScheme.background,
+    ) { innerPadding ->
     Column(
         modifier = Modifier
             .fillMaxSize()
+            .padding(innerPadding)
             .background(MaterialTheme.colorScheme.background)
     ) {
-        // Header
-        Text(
-            text = "Accounts",
-            style = MaterialTheme.typography.headlineSmall,
-            fontWeight = FontWeight.Bold,
-            modifier = Modifier
-                .statusBarsPadding()
-                .padding(horizontal = 16.dp, vertical = 12.dp)
-        )
-
+        if (isLoading) {
+            Column(modifier = Modifier.fillMaxWidth()) {
+                repeat(3) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 16.dp, vertical = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        ShimmerBox(modifier = Modifier.size(44.dp), cornerRadius = 22)
+                        Spacer(modifier = Modifier.width(12.dp))
+                        Column(
+                            modifier = Modifier.weight(1f),
+                            verticalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            ShimmerBox(
+                                modifier = Modifier.fillMaxWidth(0.55f).height(14.dp),
+                                cornerRadius = 4
+                            )
+                            ShimmerBox(
+                                modifier = Modifier.fillMaxWidth(0.75f).height(12.dp),
+                                cornerRadius = 4
+                            )
+                        }
+                    }
+                }
+            }
+        } else {
         if (accounts.isEmpty()) {
             Column(
                 modifier = Modifier
@@ -100,7 +134,7 @@ fun AccountsScreen(viewModel: AccountsViewModel = androidx.lifecycle.viewmodel.c
                                     Box(contentAlignment = Alignment.Center) {
                                         Icon(
                                             Icons.Filled.AccountCircle,
-                                            contentDescription = null,
+                                            contentDescription = "Account",
                                             modifier = Modifier.size(28.dp),
                                             tint = MaterialTheme.colorScheme.onPrimaryContainer
                                         )
@@ -135,5 +169,7 @@ fun AccountsScreen(viewModel: AccountsViewModel = androidx.lifecycle.viewmodel.c
                 item { Spacer(modifier = Modifier.height(80.dp)) }
             }
         }
+        } // end isLoading else
+    }
     }
 }

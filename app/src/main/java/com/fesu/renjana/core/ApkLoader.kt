@@ -1,12 +1,8 @@
 package com.fesu.renjana.core
 
 import android.content.Context
-import android.content.pm.ApplicationInfo
 import android.content.pm.PackageManager
-import android.content.res.AssetManager
-import android.content.res.Resources
 import com.fesu.renjana.models.AppInfo
-import com.fesu.renjana.models.Instance
 import com.fesu.renjana.utils.RenjanaLog
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -18,8 +14,6 @@ class ApkLoader(private val context: Context) {
     
     companion object {
         private const val TAG = "ApkLoader"
-        private const val DEX_PREFIX = "classes"
-        private const val DEX_SUFFIX = ".dex"
     }
 
     suspend fun parseApk(apkPath: String): AppInfo = withContext(Dispatchers.IO) {
@@ -56,40 +50,6 @@ class ApkLoader(private val context: Context) {
             throw ApkLoadException("Failed to parse APK: ${e.message}", e)
         }
     }
-
-    suspend fun extractDexFiles(apkPath: String, instanceDataPath: String): List<File> = 
-        withContext(Dispatchers.IO) {
-            RenjanaLog.d(TAG, "Extracting DEX files from: $apkPath")
-            
-            val dexFiles = mutableListOf<File>()
-            val dexDir = File(instanceDataPath, "dex").apply { mkdirs() }
-            
-            try {
-                ZipFile(apkPath).use { zip ->
-                    val entries = zip.entries()
-                    while (entries.hasMoreElements()) {
-                        val entry = entries.nextElement()
-                        if (entry.name.startsWith(DEX_PREFIX) && entry.name.endsWith(DEX_SUFFIX)) {
-                            val dexFile = File(dexDir, entry.name)
-                            RenjanaLog.d(TAG, "Extracting: ${entry.name}")
-                            
-                            zip.getInputStream(entry).use { input ->
-                                FileOutputStream(dexFile).use { output ->
-                                    input.copyTo(output)
-                                }
-                            }
-                            dexFiles.add(dexFile)
-                        }
-                    }
-                }
-                
-                RenjanaLog.i(TAG, "Extracted ${dexFiles.size} DEX files")
-                dexFiles
-            } catch (e: Exception) {
-                RenjanaLog.e(TAG, "Failed to extract DEX files")
-                throw ApkLoadException("Failed to extract DEX files: ${e.message}", e)
-            }
-        }
 
     suspend fun extractResources(apkPath: String, instanceDataPath: String): File = 
         withContext(Dispatchers.IO) {
@@ -183,41 +143,6 @@ class ApkLoader(private val context: Context) {
         } catch (e: Exception) {
             RenjanaLog.e(TAG, "Failed to find launcher activity")
             null
-        }
-    }
-
-    suspend fun extractDexFiles(
-        instance: Instance,
-        apkPath: String
-    ): List<File> = withContext(Dispatchers.IO) {
-        RenjanaLog.d(TAG, "Extracting DEX files for instance: ${instance.id}")
-        
-        try {
-            val dexDir = File(instance.dataPath, "dex").apply { mkdirs() }
-            val zipFile = ZipFile(apkPath)
-            val entries = zipFile.entries()
-            val dexFiles = mutableListOf<File>()
-            
-            while (entries.hasMoreElements()) {
-                val entry = entries.nextElement()
-                if (entry.name.endsWith(".dex")) {
-                    val outFile = File(dexDir, entry.name)
-                    zipFile.getInputStream(entry).use { input ->
-                        FileOutputStream(outFile).use { output ->
-                            input.copyTo(output)
-                        }
-                    }
-                    dexFiles.add(outFile)
-                    RenjanaLog.d(TAG, "Extracted: ${entry.name}")
-                }
-            }
-            
-            zipFile.close()
-            RenjanaLog.i(TAG, "Extracted ${dexFiles.size} DEX files")
-            dexFiles
-        } catch (e: Exception) {
-            RenjanaLog.e(TAG, "Failed to extract DEX files", e)
-            throw ApkLoadException("Failed to extract DEX files: ${e.message}", e)
         }
     }
 

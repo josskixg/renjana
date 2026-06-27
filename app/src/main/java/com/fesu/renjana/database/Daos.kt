@@ -41,11 +41,20 @@ interface InstanceDao {
     @Query("UPDATE instances SET enableGms = :enableGms, enableFingerprint = :enableFingerprint, spoofSignature = :spoofSignature, enableAntiDetection = :enableAntiDetection WHERE id = :id")
     suspend fun updateInstanceConfig(id: String, enableGms: Boolean, enableFingerprint: Boolean, spoofSignature: Boolean, enableAntiDetection: Boolean)
 
+    @Query("UPDATE instances SET instance_color = :color, instance_emoji = :emoji WHERE id = :instanceId")
+    suspend fun updateVisualConfig(instanceId: String, color: String?, emoji: String?)
+
+    @Query("UPDATE instances SET fingerprintSeed = :seed WHERE id = :instanceId")
+    suspend fun updateFingerprintSeed(instanceId: String, seed: String)
+
     @Query("UPDATE instances SET spoofModel = :model, spoofBrand = :brand, spoofManufacturer = :manufacturer, spoofAndroidVersion = :androidVersion, spoofAndroidId = :androidId, spoofSerial = :serial WHERE id = :id")
     suspend fun updateDeviceSpoof(id: String, model: String?, brand: String?, manufacturer: String?, androidVersion: String?, androidId: String?, serial: String?)
 
     @Query("UPDATE instances SET canvasHash = :canvasHash, canvasNoise = :canvasNoise, screenDensityDpi = :screenDensityDpi, screenWidthDp = :screenWidthDp, screenHeightDp = :screenHeightDp, screenRefreshRate = :screenRefreshRate, sensorAccelerometer = :sensorAccelerometer, sensorGyroscope = :sensorGyroscope, sensorMagnetometer = :sensorMagnetometer, sensorBarometer = :sensorBarometer, sensorProximity = :sensorProximity, batteryCapacityMah = :batteryCapacityMah, wifiMacPrefix = :wifiMacPrefix WHERE id = :id")
     suspend fun updateExtendedFingerprint(id: String, canvasHash: String?, canvasNoise: Float?, screenDensityDpi: Int?, screenWidthDp: Int?, screenHeightDp: Int?, screenRefreshRate: Float?, sensorAccelerometer: Boolean?, sensorGyroscope: Boolean?, sensorMagnetometer: Boolean?, sensorBarometer: Boolean?, sensorProximity: Boolean?, batteryCapacityMah: Int?, wifiMacPrefix: String?)
+
+    @Query("SELECT * FROM instances")
+    suspend fun getAllInstancesOnce(): List<InstanceEntity>
 
     @Query("SELECT COUNT(*) FROM instances")
     fun getInstanceCount(): Flow<Int>
@@ -79,4 +88,34 @@ interface GoogleAccountDao {
 
     @Query("UPDATE google_accounts SET idToken = :idToken, accessToken = :accessToken, tokenExpiryTime = :expiryTime WHERE id = :id")
     suspend fun updateAccountTokens(id: String, idToken: String, accessToken: String?, expiryTime: Long)
+}
+
+@Dao
+interface InstanceAppDao {
+    @Query("SELECT * FROM instance_apps WHERE instanceId = :instanceId ORDER BY addedAt ASC")
+    fun getAppsForInstance(instanceId: String): Flow<List<InstanceAppEntity>>
+
+    @Query("SELECT * FROM instance_apps WHERE instanceId = :instanceId ORDER BY addedAt ASC")
+    suspend fun getAppsForInstanceOnce(instanceId: String): List<InstanceAppEntity>
+
+    @Query("SELECT * FROM instance_apps WHERE instanceId = :instanceId AND packageName = :packageName LIMIT 1")
+    suspend fun getApp(instanceId: String, packageName: String): InstanceAppEntity?
+
+    @Insert(onConflict = OnConflictStrategy.ABORT)
+    suspend fun insertApp(app: InstanceAppEntity)
+
+    @Delete
+    suspend fun deleteApp(app: InstanceAppEntity)
+
+    @Query("DELETE FROM instance_apps WHERE instanceId = :instanceId AND packageName = :packageName")
+    suspend fun deleteAppByPkg(instanceId: String, packageName: String)
+
+    @Query("DELETE FROM instance_apps WHERE instanceId = :instanceId")
+    suspend fun deleteAllAppsForInstance(instanceId: String)
+
+    @Query("UPDATE instance_apps SET lastLaunched = :time WHERE instanceId = :instanceId AND packageName = :packageName")
+    suspend fun updateLastLaunched(instanceId: String, packageName: String, time: Long)
+
+    @Query("SELECT * FROM instance_apps WHERE packageName = :packageName")
+    suspend fun getInstancesForPackage(packageName: String): List<InstanceAppEntity>
 }

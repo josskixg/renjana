@@ -17,6 +17,7 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
 
     <application
         android:name=".RenjanaApplication"
@@ -62,6 +63,33 @@
         <activity android:name=".core.StubActivity_8" android:exported="false" android:theme="@style/Theme.Renjana.Transparent" />
         <activity android:name=".core.StubActivity_9" android:exported="false" android:theme="@style/Theme.Renjana.Transparent" />
 
+        <!-- Shortcut trampoline: launched by homescreen pinned shortcuts, immediately forwards to the instance -->
+        <activity
+            android:name=".core.InstanceLaunchActivity"
+            android:exported="true"
+            android:noHistory="true"
+            android:excludeFromRecents="true"
+            android:theme="@style/Theme.Renjana.Transparent" />
+
+        <!-- Deep Link Dispatcher: intercepts http/https/custom-scheme links and routes to correct instance -->
+        <activity android:name=".core.DeepLinkDispatcherActivity"
+            android:exported="true"
+            android:launchMode="singleTask"
+            android:theme="@android:style/Theme.Translucent.NoTitleBar">
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW"/>
+                <category android:name="android.intent.category.DEFAULT"/>
+                <category android:name="android.intent.category.BROWSABLE"/>
+                <data android:scheme="https"/>
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW"/>
+                <category android:name="android.intent.category.DEFAULT"/>
+                <category android:name="android.intent.category.BROWSABLE"/>
+                <data android:scheme="http"/>
+            </intent-filter>
+        </activity>
+
         <!-- Container Service (legacy stub, kept for compatibility) -->
         <service
             android:name=".core.ContainerService"
@@ -77,6 +105,11 @@
                 android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
                 android:value="Container instance lifecycle management" />
         </service>
+
+        <!-- Quick-switch floating bubble overlay -->
+        <service
+            android:name=".core.QuickSwitchBubbleService"
+            android:exported="false" />
 
         <!-- FileProvider for sharing crash reports as .txt files -->
         <provider

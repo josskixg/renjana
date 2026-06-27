@@ -90,48 +90,40 @@ fun ErrorLogScreen(
 
     // ── List View ──
     Scaffold(
-        snackbarHost = { SnackbarHost(snackbarHostState) }
-    ) { padding ->
+        snackbarHost = { SnackbarHost(snackbarHostState) },
+        topBar = {
+            TopAppBar(
+                title = { Text("Error Logs") },
+                navigationIcon = {
+                    IconButton(onClick = onNavigateBack) {
+                        Icon(Icons.Filled.ArrowBack, contentDescription = "Back")
+                    }
+                },
+                actions = {
+                    // Capture live logcat
+                    IconButton(onClick = { viewModel.captureLogcat() }) {
+                        Icon(Icons.Filled.BugReport, contentDescription = "Capture logcat")
+                    }
+                    // Clear all
+                    if (logs.isNotEmpty()) {
+                        IconButton(onClick = { showClearAllDialog = true }) {
+                            Icon(
+                                Icons.Filled.Delete,
+                                contentDescription = "Clear all",
+                                tint = MaterialTheme.colorScheme.error
+                            )
+                        }
+                    }
+                }
+            )
+        }
+    ) { innerPadding ->
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(padding)
+                .padding(innerPadding)
                 .background(MaterialTheme.colorScheme.background)
         ) {
-            // Header
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .statusBarsPadding()
-                    .padding(horizontal = 16.dp, vertical = 12.dp),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                IconButton(onClick = onNavigateBack) {
-                    Icon(Icons.Filled.ArrowBack, contentDescription = "Back")
-                }
-                Text(
-                    text = "Error Logs",
-                    style = MaterialTheme.typography.headlineSmall,
-                    fontWeight = FontWeight.Bold,
-                    modifier = Modifier.weight(1f).padding(start = 8.dp)
-                )
-                // Capture live logcat
-                IconButton(onClick = { viewModel.captureLogcat() }) {
-                    Icon(Icons.Filled.BugReport, contentDescription = "Capture logcat")
-                }
-                // Clear all
-                if (logs.isNotEmpty()) {
-                    IconButton(onClick = { showClearAllDialog = true }) {
-                        Icon(
-                            Icons.Filled.Delete,
-                            contentDescription = "Clear all",
-                            tint = MaterialTheme.colorScheme.error
-                        )
-                    }
-                }
-            }
-
             // Content
             if (isLoading && logs.isEmpty()) {
                 Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -236,29 +228,22 @@ private fun ErrorLogDetailScreen(
 ) {
     Scaffold(
         topBar = {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 8.dp, vertical = 8.dp),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                IconButton(onClick = onClose) {
-                    Icon(Icons.Filled.ArrowBack, contentDescription = "Back")
+            TopAppBar(
+                title = { Text("Crash Report") },
+                navigationIcon = {
+                    IconButton(onClick = onClose) {
+                        Icon(Icons.Filled.ArrowBack, contentDescription = "Close")
+                    }
+                },
+                actions = {
+                    IconButton(onClick = onCopy) {
+                        Icon(Icons.Filled.ContentCopy, contentDescription = "Copy")
+                    }
+                    IconButton(onClick = onShare) {
+                        Icon(Icons.Filled.Share, contentDescription = "Share")
+                    }
                 }
-                Text(
-                    text = "Crash Report",
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.Bold,
-                    modifier = Modifier.weight(1f)
-                )
-                IconButton(onClick = onCopy) {
-                    Icon(Icons.Filled.ContentCopy, contentDescription = "Copy")
-                }
-                IconButton(onClick = onShare) {
-                    Icon(Icons.Filled.Share, contentDescription = "Share")
-                }
-            }
+            )
         }
     ) { padding ->
         Surface(

@@ -1,3 +1,6 @@
+// Inset pattern: Use Scaffold + TopAppBar, apply only `.padding(padding)` from Scaffold to content.
+// Do NOT add manual statusBarsPadding — Scaffold+TopAppBar already handles status bar inset.
+
 package com.fesu.renjana.ui.screens
 
 import androidx.compose.foundation.layout.*
@@ -186,6 +189,166 @@ fun CreateInstanceScreen(
                 }
             }
         }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun CreateInstanceSheetContent(
+    packageName: String,
+    apkPath: String,
+    onDismiss: () -> Unit,
+    viewModel: CreateInstanceViewModel = androidx.lifecycle.viewmodel.compose.viewModel()
+) {
+    val pkg by viewModel.packageName.collectAsState()
+    val path by viewModel.apkPath.collectAsState()
+    val appName by viewModel.appName.collectAsState()
+    val isCreating by viewModel.isCreating.collectAsState()
+    val creationSuccess by viewModel.creationSuccess.collectAsState()
+    val error by viewModel.error.collectAsState()
+
+    val enableGms by viewModel.enableGms.collectAsState()
+    val enableFingerprint by viewModel.enableFingerprint.collectAsState()
+    val spoofSignature by viewModel.spoofSignature.collectAsState()
+    val enableAntiDetection by viewModel.enableAntiDetection.collectAsState()
+
+    val snackbarHostState = remember { SnackbarHostState() }
+
+    LaunchedEffect(packageName, apkPath) {
+        if (packageName.isNotBlank() && apkPath.isNotBlank()) {
+            viewModel.prefill(packageName, apkPath)
+        }
+    }
+
+    LaunchedEffect(creationSuccess) {
+        if (creationSuccess) {
+            viewModel.resetSuccess()
+            onDismiss()
+        }
+    }
+
+    LaunchedEffect(error) {
+        error?.let {
+            snackbarHostState.showSnackbar(it)
+            viewModel.clearError()
+        }
+    }
+
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(16.dp)
+            .verticalScroll(rememberScrollState()),
+        verticalArrangement = Arrangement.spacedBy(16.dp)
+    ) {
+        // Sheet drag handle label
+        Text(
+            text = "Create Instance",
+            style = MaterialTheme.typography.titleMedium,
+            modifier = Modifier.align(Alignment.CenterHorizontally)
+        )
+
+        // App summary card
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(12.dp)
+        ) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(16.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                if (pkg.isNotBlank()) {
+                    AppIcon(packageName = pkg, size = 56.dp)
+                } else {
+                    Icon(
+                        Icons.Filled.PhoneAndroid,
+                        contentDescription = null,
+                        modifier = Modifier.size(56.dp)
+                    )
+                }
+                Spacer(modifier = Modifier.width(16.dp))
+                Column {
+                    Text(
+                        text = appName.ifBlank { "Unknown App" },
+                        style = MaterialTheme.typography.titleMedium,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                    Text(
+                        text = pkg,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                    Text(
+                        text = path,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+            }
+        }
+
+        // Config toggles
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(12.dp)
+        ) {
+            Column {
+                ConfigToggleRow(
+                    title = "Enable GMS",
+                    subtitle = "Google Mobile Services support",
+                    checked = enableGms,
+                    onCheckedChange = { viewModel.updateEnableGms(it) }
+                )
+                Divider()
+                ConfigToggleRow(
+                    title = "Spoof Signature",
+                    subtitle = "Spoof app signature for compatibility",
+                    checked = spoofSignature,
+                    onCheckedChange = { viewModel.updateSpoofSignature(it) }
+                )
+                Divider()
+                ConfigToggleRow(
+                    title = "Anti-Detection",
+                    subtitle = "Hide cloned app from detection",
+                    checked = enableAntiDetection,
+                    onCheckedChange = { viewModel.updateEnableAntiDetection(it) }
+                )
+                Divider()
+                ConfigToggleRow(
+                    title = "Spoof Fingerprint",
+                    subtitle = "Randomize device fingerprint",
+                    checked = enableFingerprint,
+                    onCheckedChange = { viewModel.updateEnableFingerprint(it) }
+                )
+            }
+        }
+
+        Button(
+            onClick = { viewModel.createInstance() },
+            modifier = Modifier.fillMaxWidth(),
+            enabled = pkg.isNotBlank() && path.isNotBlank() && !isCreating,
+            shape = RoundedCornerShape(12.dp)
+        ) {
+            if (isCreating) {
+                CircularProgressIndicator(
+                    modifier = Modifier.size(18.dp),
+                    strokeWidth = 2.dp,
+                    color = MaterialTheme.colorScheme.onPrimary
+                )
+            } else {
+                Text("Create Instance")
+            }
+        }
+
+        // Bottom spacing for navigation bar
+        Spacer(modifier = Modifier.windowInsetsBottomHeight(WindowInsets.navigationBars))
     }
 }
 

@@ -4,7 +4,6 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.layout.WindowInsets
-import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
@@ -12,8 +11,10 @@ import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.activity.compose.BackHandler
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Apps
+import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Search
@@ -40,12 +41,18 @@ import com.fesu.renjana.ui.viewmodels.AppsViewModel
 
 enum class AppViewMode { LIST, GRID }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun AppsScreen(
     viewModel: AppsViewModel = androidx.lifecycle.viewmodel.compose.viewModel(),
     onSelectApp: (AppInfo) -> Unit = {},
-    clonedPackageNames: Set<String> = emptySet()
+    clonedPackageNames: Set<String> = emptySet(),
+    onNavigateBack: (() -> Unit)? = null
 ) {
+    if (onNavigateBack != null) {
+        BackHandler { onNavigateBack.invoke() }
+    }
+
     val apps by viewModel.apps.collectAsState()
     val isLoading by viewModel.isLoading.collectAsState()
     val error by viewModel.error.collectAsState()
@@ -62,41 +69,40 @@ fun AppsScreen(
         }
     }
 
+    Scaffold(
+        topBar = {
+            TopAppBar(
+                title = { Text("Apps", fontWeight = FontWeight.Bold) },
+                navigationIcon = if (onNavigateBack != null) {
+                    {
+                        IconButton(onClick = { onNavigateBack.invoke() }) {
+                            Icon(Icons.Filled.ArrowBack, contentDescription = "Back")
+                        }
+                    }
+                } else ({}),
+                actions = {
+                    IconButton(onClick = {
+                        haptics.tick()
+                        viewMode = if (viewMode == AppViewMode.LIST) AppViewMode.GRID else AppViewMode.LIST
+                    }) {
+                        Icon(
+                            if (viewMode == AppViewMode.LIST) Icons.Filled.ViewModule else Icons.Filled.ViewList,
+                            contentDescription = if (viewMode == AppViewMode.LIST) "Grid view" else "List view"
+                        )
+                    }
+                    IconButton(onClick = { haptics.tick(); viewModel.refresh() }) {
+                        Icon(Icons.Filled.Refresh, contentDescription = "Refresh")
+                    }
+                }
+            )
+        },
+        containerColor = MaterialTheme.colorScheme.background,
+    ) { innerPadding ->
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .background(MaterialTheme.colorScheme.background)
-            .statusBarsPadding()
+            .padding(innerPadding)
     ) {
-        // Header
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 16.dp, vertical = 12.dp),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Text(
-                text = "Apps",
-                style = MaterialTheme.typography.headlineSmall,
-                fontWeight = FontWeight.Bold
-            )
-            Row {
-                IconButton(onClick = {
-                    haptics.tick()
-                    viewMode = if (viewMode == AppViewMode.LIST) AppViewMode.GRID else AppViewMode.LIST
-                }) {
-                    Icon(
-                        if (viewMode == AppViewMode.LIST) Icons.Filled.ViewModule else Icons.Filled.ViewList,
-                        contentDescription = "Toggle view"
-                    )
-                }
-                IconButton(onClick = { haptics.tick(); viewModel.refresh() }) {
-                    Icon(Icons.Filled.Refresh, contentDescription = "Refresh")
-                }
-            }
-        }
-
         // Search
         OutlinedTextField(
             value = searchQuery,
@@ -105,7 +111,7 @@ fun AppsScreen(
                 .fillMaxWidth()
                 .padding(horizontal = 16.dp, vertical = 4.dp),
             placeholder = { Text("Search apps...") },
-            leadingIcon = { Icon(Icons.Filled.Search, contentDescription = null) },
+            leadingIcon = { Icon(Icons.Filled.Search, contentDescription = "Search") },
             singleLine = true,
             shape = RoundedCornerShape(14.dp),
             colors = OutlinedTextFieldDefaults.colors(
@@ -198,9 +204,9 @@ fun AppsScreen(
         }
     }
 }
-
+}
 @Composable
-private fun AppListItem(app: AppInfo, isCloned: Boolean, onClick: () -> Unit) {
+fun AppListItem(app: AppInfo, isCloned: Boolean, onClick: () -> Unit) {
     PressableCard(
         onClick = onClick,
         modifier = Modifier.fillMaxWidth()
@@ -271,7 +277,7 @@ private fun AppListItem(app: AppInfo, isCloned: Boolean, onClick: () -> Unit) {
 }
 
 @Composable
-private fun AppGridItem(app: AppInfo, isCloned: Boolean, onClick: () -> Unit) {
+fun AppGridItem(app: AppInfo, isCloned: Boolean, onClick: () -> Unit) {
     PressableCard(
         onClick = onClick,
         modifier = Modifier.fillMaxWidth()

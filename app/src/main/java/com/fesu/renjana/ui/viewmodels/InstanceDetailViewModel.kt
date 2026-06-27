@@ -4,12 +4,15 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.fesu.renjana.RenjanaApplication
 import com.fesu.renjana.core.DeviceDatabase
+import com.fesu.renjana.database.InstanceAppEntity
 import com.fesu.renjana.models.Instance
 import com.fesu.renjana.models.InstanceConfig
 import com.fesu.renjana.utils.RenjanaLog
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
 // ---------------------------------------------------------------------------
@@ -51,6 +54,36 @@ class InstanceDetailViewModel(
 
     private val _isDeleted = MutableStateFlow(false)
     val isDeleted: StateFlow<Boolean> = _isDeleted.asStateFlow()
+
+    // -----------------------------------------------------------------------
+    // Instance apps (multi-app container)
+    // -----------------------------------------------------------------------
+
+    val instanceApps: StateFlow<List<InstanceAppEntity>> =
+        instanceManager.getAppsForInstance(instanceId)
+            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    fun launchApp(packageName: String) {
+        viewModelScope.launch {
+            try {
+                instanceLauncher.launchApp(instanceId, packageName)
+            } catch (e: Exception) {
+                RenjanaLog.e(TAG, "Failed to launch app $packageName: ${e.message}")
+                _error.value = e.message ?: "Failed to launch app"
+            }
+        }
+    }
+
+    fun removeApp(packageName: String) {
+        viewModelScope.launch {
+            try {
+                instanceManager.removeAppFromInstance(instanceId, packageName)
+            } catch (e: Exception) {
+                RenjanaLog.e(TAG, "Failed to remove app $packageName: ${e.message}")
+                _error.value = e.message ?: "Failed to remove app"
+            }
+        }
+    }
 
     // -----------------------------------------------------------------------
     // Tadiphone / device randomization state
@@ -182,13 +215,30 @@ class InstanceDetailViewModel(
     fun launchInstance() {
         viewModelScope.launch {
             try {
-                val success = instanceLauncher.launchInstance(instanceId)
-                if (!success) {
-                    _error.value = "Failed to launch instance. Check Error Logs for details."
+                when (val result = instanceLauncher.launchInstance(instanceId)) {
+                    is com.fesu.renjana.core.LaunchResult.Success -> { /* ok */ }
+                    is com.fesu.renjana.core.LaunchResult.FallbackNoIsolation ->
+                        _error.value = "⚠️ ${result.reason}"
+                    is com.fesu.renjana.core.LaunchResult.Failure ->
+                        _error.value = result.message
                 }
             } catch (e: Exception) {
                 RenjanaLog.e(TAG, "Failed to launch instance: ${e.message}")
                 _error.value = e.message ?: "Failed to launch instance"
+            }
+        }
+    }
+
+    fun stopInstance() {
+        viewModelScope.launch {
+            try {
+                com.fesu.renjana.core.InstanceLifecycleService.stopInstance(
+                    context = RenjanaApplication.get(),
+                    instanceId = instanceId
+                )
+            } catch (e: Exception) {
+                RenjanaLog.e(TAG, "Failed to stop instance: ${e.message}")
+                _error.value = e.message ?: "Failed to stop instance"
             }
         }
     }
@@ -245,6 +295,51 @@ class InstanceDetailViewModel(
                 _actionSuccess.value = "Extended fingerprint updated"
             } catch (e: Exception) {
                 _error.value = e.message ?: "Failed to update fingerprint"
+            }
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // Visual customization
+    // -----------------------------------------------------------------------
+
+    fun updateInstanceColor(color: String?) {
+        val current = _instance.value ?: return
+        val newConfig = current.config.copy(instanceColor = color)
+        viewModelScope.launch {
+            try {
+                instanceManager.updateVisualConfig(instanceId, newConfig.instanceColor, newConfig.instanceEmoji)
+                _instance.value = current.copy(config = newConfig)
+                _actionSuccess.value = "Accent color updated"
+            } catch (e: Exception) {
+                _error.value = e.message ?: "Failed to update color"
+            }
+        }
+    }
+
+    fun updateInstanceEmoji(emoji: String?) {
+        val current = _instance.value ?: return
+        val newConfig = current.config.copy(instanceEmoji = emoji)
+        viewModelScope.launch {
+            try {
+                instanceManager.updateVisualConfig(instanceId, newConfig.instanceColor, newConfig.instanceEmoji)
+                _instance.value = current.copy(config = newConfig)
+                _actionSuccess.value = "Label updated"
+            } catch (e: Exception) {
+                _error.value = e.message ?: "Failed to update emoji"
+            }
+        }
+    }
+
+    fun updateVisualConfig(color: String?, emoji: String?) {
+        viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+            try {
+                val current = _instance.value ?: return@launch
+                val newConfig = current.config.copy(instanceColor = color, instanceEmoji = emoji?.ifBlank { null })
+                instanceManager.updateVisualConfig(current.id, newConfig.instanceColor, newConfig.instanceEmoji)
+                _instance.value = current.copy(config = newConfig)
+            } catch (e: Exception) {
+                _error.value = "Failed to save: ${e.message}"
             }
         }
     }

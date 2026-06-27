@@ -1,11 +1,11 @@
 package com.fesu.renjana.core
 
-import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import com.fesu.renjana.RenjanaApplication
 import com.fesu.renjana.hooks.CoreHooks
+import com.fesu.renjana.hooks.PineHookManager
 import com.fesu.renjana.utils.IntentUtils
 import com.fesu.renjana.utils.RenjanaLog
 import java.util.concurrent.ConcurrentHashMap
@@ -16,7 +16,7 @@ import java.util.concurrent.ConcurrentHashMap
  * Every Intent operation from guest apps flows through this router:
  * 1. Intent is validated and sanitized
  * 2. Routing strategy is determined (internal / cross-instance / external / blocked)
- * 3. Intent is rewritten to target [WrapperActivity] or system as appropriate
+ * 3. Intent is rewritten to target [StubActivity] or system as appropriate
  * 4. The rewritten Intent is dispatched
  *
  * Thread-safe: all mutable state is protected by ConcurrentHashMap / synchronized blocks.
@@ -30,7 +30,7 @@ class IntentRouter(private val context: Context) {
         const val EXTRA_ROUTING_STRATEGY = "com.renjana.container.internal.routing_strategy"
         const val EXTRA_ORIGINAL_INTENT = "com.renjana.container.internal.original_intent"
         const val EXTRA_SOURCE_INSTANCE_ID = "com.renjana.container.internal.source_instance"
-        const val EXTRA_GUEST_ACTIVITY_CLASS = WrapperActivity.EXTRA_GUEST_ACTIVITY_CLASS
+        const val EXTRA_GUEST_ACTIVITY_CLASS = StubActivity.EXTRA_GUEST_ACTIVITY_CLASS
 
         // Routing strategy constants (stored as Int in Intent extra)
         const val STRATEGY_INTERNAL = 0         // Guest-to-guest within same instance
@@ -78,6 +78,59 @@ class IntentRouter(private val context: Context) {
     fun registerVirtualPackage(packageName: String, instanceId: String) {
         virtualPackages[packageName] = instanceId
         RenjanaLog.d(TAG, "Registered virtual package: $packageName -> $instanceId")
+    }
+
+    /**
+     * Register a virtual package and install Pine hooks for the guest process.
+     *
+     * This is the primary entry point called by the instance launcher when a
+     * guest app is started. It performs two things:
+     *  1. Registers the package in the routing table (so Intent routing works)
+     *  2. Calls [PineHookManager.installGuestHooks] to install all guest hooks
+     *     (Google Sign-In virtualization, signature spoofing, detection evasion,
+     *     etc.) into the guest app's [classLoader].
+     *
+     * If Pine is not available (root mode or Pine not loaded), only the routing
+     * registration is performed — the guest will still run but without non-root
+     * hooks.
+     *
+     * @param packageName The guest app's package name
+     * @param instanceId The container instance ID
+     * @param classLoader The guest app's ClassLoader (for hook installation)
+     * @param dataPath The virtual data path for this instance
+     * @return true if hooks were installed (or not needed); false if hook
+     *         installation was attempted but failed
+     */
+    fun registerVirtualPackage(
+        packageName: String,
+        instanceId: String,
+        classLoader: ClassLoader,
+        dataPath: String
+    ): Boolean {
+        // Step 1: register in the routing table
+        registerVirtualPackage(packageName, instanceId)
+
+        // Step 2: ensure Pine is initialized
+        if (!PineHookManager.isAvailable()) {
+            PineHookManager.initialize()
+        }
+
+        // Step 3: install guest hooks if Pine is available
+        if (PineHookManager.isAvailable()) {
+            val hooksOk = PineHookManager.installGuestHooks(
+                packageName, classLoader, instanceId, dataPath
+            )
+            if (hooksOk) {
+                RenjanaLog.i(TAG, "Guest hooks installed for $packageName (instance $instanceId)")
+            } else {
+                RenjanaLog.w(TAG, "Guest hook installation failed for $packageName (instance $instanceId)")
+            }
+            return hooksOk
+        }
+
+        // Pine not available (e.g. root mode uses Xposed instead) — not an error
+        RenjanaLog.d(TAG, "Pine not available, skipping guest hooks for $packageName (likely root/Xposed mode)")
+        return true
     }
 
     /**
@@ -187,7 +240,7 @@ class IntentRouter(private val context: Context) {
         val sourcePackage = getPackageForInstance(sourceInstanceId)
         if (sourcePackage == targetPackage) {
             RenjanaLog.d(TAG, "INTERNAL routing: $targetClass within instance $sourceInstanceId")
-            val routed = rewriteForWrapperActivity(intent, sourceInstanceId, targetClass)
+            val routed = rewriteForStubActivity(intent, sourceInstanceId, targetClass)
             return RoutingResult(
                 strategy = STRATEGY_INTERNAL,
                 routedIntent = routed,
@@ -201,7 +254,7 @@ class IntentRouter(private val context: Context) {
         if (isVirtualPackage(targetPackage)) {
             val targetInstanceId = virtualPackages[targetPackage]!!
             RenjanaLog.d(TAG, "CROSS_INSTANCE routing: $targetClass -> instance $targetInstanceId")
-            val routed = rewriteForWrapperActivity(intent, targetInstanceId, targetClass)
+            val routed = rewriteForStubActivity(intent, targetInstanceId, targetClass)
             return RoutingResult(
                 strategy = STRATEGY_CROSS_INSTANCE,
                 routedIntent = routed,
@@ -250,7 +303,7 @@ class IntentRouter(private val context: Context) {
             RenjanaLog.d(TAG, "Implicit match: $targetClass (priority=${bestMatch.priority})")
 
             val targetInstanceId = virtualPackages[targetPackage] ?: sourceInstanceId
-            val routed = rewriteForWrapperActivity(intent, targetInstanceId, targetClass)
+            val routed = rewriteForStubActivity(intent, targetInstanceId, targetClass)
 
             val strategy = if (virtualPackages[targetPackage] == sourceInstanceId) {
                 STRATEGY_INTERNAL
@@ -511,34 +564,88 @@ class IntentRouter(private val context: Context) {
     // ==================== Intent Rewriting ====================
 
     /**
-     * Rewrite an Intent to target WrapperActivity, embedding guest class info.
-     * The original component is replaced with WrapperActivity's ComponentName,
-     * and the guest class name is stored as an extra.
+     * Rewrite an Intent to target a [StubActivity] allocated by [ActivityStubManager],
+     * embedding the guest class info, instance ID, and APK path.
+     *
+     * The original guest Intent is preserved as [StubActivity.EXTRA_GUEST_ORIGINAL_INTENT]
+     * so the stub can forward it to the guest Activity. This replaces the deprecated
+     * wrapper-activity routing (which bound the guest to the real host context,
+     * providing zero storage isolation); [StubActivity] wraps its base context in a
+     * [com.fesu.renjana.virtual.VirtualContext] so guest state stays sandboxed.
+     *
+     * The instance context is preserved: the rewritten Intent carries
+     * [StubActivity.EXTRA_INSTANCE_ID] (set by [ActivityStubManager.buildStubIntent])
+     * and [EXTRA_SOURCE_INSTANCE_ID].
+     *
+     * @param intent            the original guest Intent (component = guest Activity)
+     * @param targetInstanceId  the container instance ID this Activity belongs to
+     * @param guestClassName    fully-qualified guest Activity class name
+     * @return a rewritten Intent targeting an allocated `StubActivity_N`, or the
+     *         original Intent if no stub slots are available
      */
-    private fun rewriteForWrapperActivity(
+    private fun rewriteForStubActivity(
         intent: Intent,
         targetInstanceId: String,
         guestClassName: String
     ): Intent {
         val copy = IntentUtils.deepCopy(intent) ?: intent
 
-        // Replace component with WrapperActivity
-        copy.component = ComponentName(context.packageName, WrapperActivity::class.java.name)
+        // Resolve the guest APK path required by StubActivity to load the guest class.
+        val apkPath = resolveApkPath(targetInstanceId)
 
-        // Embed virtual context
-        copy.putExtra(WrapperActivity.EXTRA_INSTANCE_ID, targetInstanceId)
-        copy.putExtra(WrapperActivity.EXTRA_GUEST_ACTIVITY_CLASS, guestClassName)
-        copy.putExtra(EXTRA_SOURCE_INSTANCE_ID, targetInstanceId)
+        // Allocate a stub slot and build the targeting Intent. buildStubIntent sets
+        // EXTRA_INSTANCE_ID, EXTRA_GUEST_ACTIVITY_CLASS and EXTRA_APK_PATH, targets
+        // the allocated StubActivity_N component, and embeds the original guest
+        // Intent as EXTRA_GUEST_ORIGINAL_INTENT for the stub to forward.
+        val stubIntent = ActivityStubManager.buildStubIntent(
+            context,
+            targetInstanceId,
+            guestClassName,
+            copy,
+            apkPath,
+            ActivityStubManager.LAUNCH_STANDARD
+        )
 
-        // Preserve task affinity: if flags indicate new task, keep them
-        // but ensure CLEAR_TOP doesn't kill the host task
-        val flags = copy.flags
+        if (stubIntent == null) {
+            // No free stub slots — degrade gracefully by returning the original
+            // Intent; dispatch will surface an ActivityNotFoundException.
+            RenjanaLog.w(
+                TAG,
+                "No stub slot available for $guestClassName in instance $targetInstanceId; returning original intent"
+            )
+            return copy
+        }
+
+        // Preserve the routing context so downstream dispatch can correlate source/target.
+        stubIntent.putExtra(EXTRA_SOURCE_INSTANCE_ID, targetInstanceId)
+
+        // Preserve task affinity: strip CLEAR_TASK so launching the stub does not wipe
+        // the host task (the stub runs in the host process/task).
+        val flags = stubIntent.flags
         if (flags and Intent.FLAG_ACTIVITY_CLEAR_TASK != 0) {
-            copy.flags = flags and Intent.FLAG_ACTIVITY_CLEAR_TASK.inv()
+            stubIntent.flags = flags and Intent.FLAG_ACTIVITY_CLEAR_TASK.inv()
             RenjanaLog.d(TAG, "Stripped CLEAR_TASK flag to protect host task")
         }
 
-        return copy
+        return stubIntent
+    }
+
+    /**
+     * Resolve the guest APK path for [instanceId] by looking up the instance.
+     * Returns an empty string if the instance cannot be resolved; [StubActivity]
+     * will then log and finish() rather than crash.
+     */
+    private fun resolveApkPath(instanceId: String): String {
+        return try {
+            val instanceManager = RenjanaApplication.get().instanceManager
+            val instance = kotlinx.coroutines.runBlocking {
+                instanceManager.getInstanceById(instanceId)
+            }
+            instance?.apkPath.orEmpty()
+        } catch (e: Exception) {
+            RenjanaLog.w(TAG, "Failed to resolve apkPath for instance $instanceId: ${e.message}")
+            ""
+        }
     }
 
     // ==================== Flag Handling ====================
@@ -610,6 +717,80 @@ class IntentRouter(private val context: Context) {
     private fun getPackageForInstance(instanceId: String): String? {
         return virtualPackages.entries.find { it.value == instanceId }?.key
     }
+
+    // ==================== Deep Link Routing ====================
+
+    /**
+     * Resolve the Renjana instanceId that should handle the given URI.
+     *
+     * Checks the URI scheme against IntentFilterManager's scheme registry.
+     * Returns null if no instance is registered for this scheme (caller should
+     * pass through to the original app or OS).
+     *
+     * @param uri The deep link URI from the incoming Intent
+     * @return instanceId string, or null if not handled by any virtual instance
+     */
+    fun resolveDeepLink(uri: Uri): String? {
+        val scheme = uri.scheme ?: return null
+        val instanceId = filterManager.resolveScheme(scheme)
+        if (instanceId != null) {
+            RenjanaLog.d(TAG, "resolveDeepLink: scheme=$scheme -> instance=$instanceId")
+        }
+        return instanceId
+    }
+
+    /**
+     * Build a StubActivity Intent that delivers the original deep link to the
+     * correct virtual instance, preserving the full URI data.
+     *
+     * The StubActivity will receive the originalIntent's URI via its data field
+     * and can forward it into the guest app's Activity stack.
+     *
+     * @param context        Context for building the Intent
+     * @param instanceId     The target virtual instance
+     * @param originalIntent The original VIEW intent carrying the deep link URI
+     * @return A fully-configured Intent targeting a free StubActivity slot
+     */
+    fun buildDeepLinkIntent(context: Context, instanceId: String, originalIntent: Intent): Intent {
+        val packageName = getPackageForInstance(instanceId)
+
+        // Resolve the guest's launcher activity as the deep link entry point
+        val stubIntent = ActivityStubManager.buildStubIntent(
+            context = context,
+            instanceId = instanceId,
+            guestClass = packageName ?: "",
+            guestIntent = originalIntent,
+            apkPath = "",          // StubActivity resolves apkPath from its cached instance
+            launchMode = ActivityStubManager.LAUNCH_STANDARD
+        )
+
+        if (stubIntent != null) {
+            // Carry the original URI so the guest can read Intent.data
+            stubIntent.data = originalIntent.data
+            stubIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            stubIntent.putExtra(EXTRA_ROUTING_STRATEGY, STRATEGY_INTERNAL)
+            stubIntent.putExtra(EXTRA_SOURCE_INSTANCE_ID, instanceId)
+            RenjanaLog.d(TAG, "buildDeepLinkIntent: built stub intent for instance=$instanceId uri=${originalIntent.data}")
+            return stubIntent
+        }
+
+        // Fallback: no free stub slot — launch the deep link directly into the instance
+        // by routing through the container's DeepLinkDispatcherActivity (no-op pass-through).
+        RenjanaLog.w(TAG, "buildDeepLinkIntent: no free stub slots, using bare forwarding intent")
+        return Intent(originalIntent).apply {
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            putExtra(EXTRA_ROUTING_STRATEGY, STRATEGY_EXTERNAL)
+            putExtra(EXTRA_SOURCE_INSTANCE_ID, instanceId)
+        }
+    }
+
+    /**
+     * Check whether a URI scheme is registered to any virtual instance.
+     * Delegates to [IntentFilterManager.hasScheme].
+     *
+     * Used by [ActivityStarterHook] to decide whether to intercept a VIEW intent.
+     */
+    fun hasRegisteredScheme(scheme: String): Boolean = filterManager.hasScheme(scheme)
 
     /**
      * Reset all routing state. Called on container shutdown.

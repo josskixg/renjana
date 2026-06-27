@@ -44,6 +44,11 @@ data class InstanceEntity(
     val sensorProximity: Boolean? = null,
     val batteryCapacityMah: Int? = null,
     val wifiMacPrefix: String? = null,
+    // Visual customization
+    @ColumnInfo(name = "instance_color") val instanceColor: String? = null,
+    @ColumnInfo(name = "instance_emoji") val instanceEmoji: String? = null,
+    // Container name (alias for appName; appName kept for migration continuity)
+    val containerName: String = "",
 )
 
 @Entity(tableName = "google_accounts")
@@ -57,4 +62,27 @@ data class GoogleAccountEntity(
     val refreshToken: String?,
     val tokenExpiryTime: Long,
     val createdAt: Long,
+)
+
+@Entity(
+    tableName = "instance_apps",
+    primaryKeys = ["instanceId", "packageName"],
+    foreignKeys = [ForeignKey(
+        entity = InstanceEntity::class,
+        parentColumns = ["id"],
+        childColumns = ["instanceId"],
+        onDelete = ForeignKey.CASCADE
+    )],
+    indices = [Index("instanceId"), Index("packageName")]
+)
+data class InstanceAppEntity(
+    val instanceId: String,
+    val packageName: String,
+    val appName: String,
+    val versionName: String = "",
+    val versionCode: Int = 0,
+    val apkPath: String,
+    val iconPath: String? = null,
+    val addedAt: Long = System.currentTimeMillis(),
+    val lastLaunched: Long = 0L
 )

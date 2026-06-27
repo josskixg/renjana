@@ -4,7 +4,10 @@ import android.content.Intent
 import android.content.IntentFilter
 import android.net.Uri
 import com.fesu.renjana.utils.RenjanaLog
+import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.CopyOnWriteArrayList
+import java.util.zip.ZipFile
+import javax.xml.parsers.DocumentBuilderFactory
 
 /**
  * Matches incoming Intents against registered filters to determine routing.
@@ -18,9 +21,9 @@ import java.util.concurrent.CopyOnWriteArrayList
  */
 class IntentFilterManager {
 
-    companion object {
-        private const val TAG = "IntentFilter"
-    }
+    private val TAG = "IntentFilter"
+
+    // Note: companion object with MANIFEST_KEYWORDS is defined at the bottom of the class
 
     /**
      * Registered filter entry with metadata.
@@ -348,16 +351,173 @@ class IntentFilterManager {
         return Regex("^$regex$").matches(path)
     }
 
+    // ==================== Deep Link Scheme Registry ====================
+
     /**
-     * Clear all registered filters.
+     * Maps URI scheme (e.g. "shopee", "gojek") -> instanceId.
+     * Populated when a guest APK is launched by parsing its AndroidManifest.xml.
+     */
+    private val schemeRegistry = ConcurrentHashMap<String, String>()
+
+    /**
+     * Register a custom URI scheme for a virtual instance.
+     * Called when a guest APK is launched and its manifest is parsed.
+     *
+     * @param scheme     URI scheme string, e.g. "shopee", "gojek", "https"
+     * @param instanceId The Renjana instance that owns this scheme
+     */
+    fun registerScheme(scheme: String, instanceId: String) {
+        schemeRegistry[scheme] = instanceId
+        RenjanaLog.d(TAG, "Registered deep link scheme: $scheme -> $instanceId")
+    }
+
+    /**
+     * Check if a URI scheme is registered to any virtual instance.
+     */
+    fun hasScheme(scheme: String): Boolean = schemeRegistry.containsKey(scheme)
+
+    /**
+     * Return the instanceId that owns the given URI scheme, or null if not registered.
+     */
+    fun resolveScheme(scheme: String): String? = schemeRegistry[scheme]
+
+    /**
+     * Parse the guest APK's AndroidManifest.xml, extract all <data android:scheme=...>
+     * entries from intent-filters, and register each scheme to the given instance.
+     *
+     * Uses ZipFile + DocumentBuilderFactory — no external dependencies required.
+     *
+     * @param apkPath    Absolute path to the guest .apk file
+     * @param instanceId The Renjana instance to associate schemes with
+     */
+    fun registerSchemesFromApk(apkPath: String, instanceId: String) {
+        try {
+            ZipFile(apkPath).use { zip ->
+                val manifestEntry = zip.getEntry("AndroidManifest.xml") ?: run {
+                    RenjanaLog.w(TAG, "No AndroidManifest.xml in APK: $apkPath")
+                    return
+                }
+                // AndroidManifest.xml inside APK is binary XML — we use the parsed
+                // representation via DocumentBuilderFactory only when it is text XML.
+                // For binary AXML we fall back to a byte-level scheme scan.
+                zip.getInputStream(manifestEntry).use { stream ->
+                    val bytes = stream.readBytes()
+                    val schemes = extractSchemesFromManifestBytes(bytes)
+                    for (scheme in schemes) {
+                        if (scheme.isNotBlank()) {
+                            registerScheme(scheme, instanceId)
+                        }
+                    }
+                    RenjanaLog.i(TAG, "Registered ${schemes.size} scheme(s) from APK for instance $instanceId")
+                }
+            }
+        } catch (e: Exception) {
+            RenjanaLog.e(TAG, "Failed to parse APK manifest for schemes: ${e.message}")
+        }
+    }
+
+    /**
+     * Extract URI schemes from manifest bytes.
+     *
+     * Android APK manifests are binary AXML. We use two strategies:
+     * 1. Try DocumentBuilderFactory (works for text XML, e.g. in test/debug APKs).
+     * 2. Fallback: scan for the string "scheme" in the binary AXML and read the
+     *    null-terminated UTF-16 LE value that follows — works for production APKs.
+     *
+     * This avoids adding any external AXML-parsing dependency.
+     */
+    private fun extractSchemesFromManifestBytes(bytes: ByteArray): Set<String> {
+        val schemes = mutableSetOf<String>()
+
+        // Strategy 1: text XML (test APKs, merged manifests)
+        try {
+            val doc = DocumentBuilderFactory.newInstance()
+                .newDocumentBuilder()
+                .parse(bytes.inputStream())
+            val dataNodes = doc.getElementsByTagName("data")
+            for (i in 0 until dataNodes.length) {
+                val scheme = dataNodes.item(i).attributes
+                    ?.getNamedItem("android:scheme")?.nodeValue
+                if (!scheme.isNullOrBlank()) schemes.add(scheme)
+            }
+            if (schemes.isNotEmpty()) return schemes
+        } catch (_: Exception) {
+            // binary AXML — fall through to Strategy 2
+        }
+
+        // Strategy 2: binary AXML string-pool scan.
+        // The string pool in binary AXML stores UTF-16 LE strings. We scan for the
+        // byte pattern of "scheme" (as UTF-16 LE) and then collect values that appear
+        // in data-attribute positions. This is a heuristic but reliable for well-formed APKs.
+        try {
+            val schemeTag = "scheme".toByteArray(Charsets.UTF_16LE)
+            var i = 0
+            while (i < bytes.size - schemeTag.size) {
+                var match = true
+                for (j in schemeTag.indices) {
+                    if (bytes[i + j] != schemeTag[j]) { match = false; break }
+                }
+                if (match) {
+                    // The value string typically follows within the next 512 bytes.
+                    // Read UTF-16 LE strings nearby that look like URI schemes.
+                    val window = bytes.copyOfRange(
+                        i + schemeTag.size,
+                        minOf(i + schemeTag.size + 512, bytes.size)
+                    )
+                    val text = String(window, Charsets.UTF_16LE)
+                    // Extract tokens that look like URI schemes (alphanumeric + dot/plus/hyphen)
+                    val schemeRegex = Regex("[a-zA-Z][a-zA-Z0-9+\\-.]{1,30}")
+                    schemeRegex.findAll(text).forEach { result ->
+                        val candidate = result.value.lowercase()
+                        // Exclude common XML/manifest keywords that aren't URI schemes
+                        if (candidate !in Companion.MANIFEST_KEYWORDS) {
+                            schemes.add(candidate)
+                        }
+                    }
+                }
+                i++
+            }
+        } catch (e: Exception) {
+            RenjanaLog.w(TAG, "Binary AXML scheme scan failed: ${e.message}")
+        }
+
+        return schemes
+    }
+
+    /**
+     * Remove all scheme registrations for a given instance.
+     * Called when an instance is stopped or deleted.
+     */
+    fun unregisterSchemes(instanceId: String) {
+        val removed = schemeRegistry.entries.removeAll { it.value == instanceId }
+        if (removed) {
+            RenjanaLog.d(TAG, "Unregistered deep link schemes for instance: $instanceId")
+        }
+    }
+
+    /**
+     * Clear all registered filters AND scheme registrations.
      */
     fun clear() {
         filters.clear()
-        RenjanaLog.i(TAG, "All filters cleared")
+        schemeRegistry.clear()
+        RenjanaLog.i(TAG, "All filters and schemes cleared")
     }
 
     /**
      * Get count of registered filters.
      */
     fun size(): Int = filters.size
+
+    companion object {
+        /** Common XML/manifest attribute names that are not URI schemes. */
+        private val MANIFEST_KEYWORDS = setOf(
+            "android", "package", "scheme", "host", "path", "port", "type",
+            "action", "category", "data", "intent", "filter", "activity",
+            "service", "receiver", "provider", "application", "manifest",
+            "uses", "permission", "feature", "sdk", "version", "name",
+            "label", "icon", "theme", "exported", "enabled", "process",
+            "true", "false", "null", "string", "integer", "boolean"
+        )
+    }
 }

@@ -16,7 +16,11 @@ import java.lang.reflect.Method
 
 /**
  * WrapperActivity - Loads and runs guest app Activities in an isolated container.
+ *
+ * @deprecated Use [StubActivity] instead. WrapperActivity sets mBase to the real
+ * host context, providing zero isolation. Kept as emergency fallback only.
  */
+@Deprecated("Use StubActivity instead. WrapperActivity sets mBase to real host context, providing zero isolation. Kept as emergency fallback only.")
 class WrapperActivity : Activity() {
 
     private var guestActivity: Activity? = null

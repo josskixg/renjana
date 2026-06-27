@@ -4,22 +4,37 @@ import android.os.Parcelable
 import kotlinx.parcelize.Parcelize
 
 /**
- * A container instance wrapping a single guest APK.
+ * A container instance. In v0.1.0 a single guest APK is embedded directly in
+ * this model; from v0.2.0 onward apps live in the [InstanceApp] table and this
+ * model acts as the container descriptor only.
  *
  * Renjana is NOT a virtual machine or full OS sandbox. Each instance is a
  * lightweight container — it runs the guest APK's code directly on the host
- * Android runtime, but with isolated storage, optional identity spoofing,
- * and optional GMS virtualization.
+ * Android runtime, but with isolated storage.
  *
  * Think: smart container, not virtual machine.
+ *
+ * NOTE: v0.1.0: storage isolation, GMS virtualization, signature spoof, fingerprint spoof, anti-detection.
  */
 @Parcelize
 data class Instance(
     val id: String,
+    /**
+     * For v0.1.0 backward compat: appName serves as container name.
+     * Apps are in InstanceApp table.
+     */
     val appName: String,
+    /**
+     * DEPRECATED: Single-app field. In multi-app mode, see InstanceAppEntity.
+     * Kept for backward compat.
+     */
     val packageName: String,
     val versionName: String,
     val versionCode: Int,
+    /**
+     * DEPRECATED: Single-app field. In multi-app mode, see InstanceAppEntity.
+     * Kept for backward compat.
+     */
     val apkPath: String,
     val iconPath: String?,
     val accountId: String?,      // linked Google account (null = no account)
@@ -33,9 +48,9 @@ data class Instance(
 /**
  * Per-instance feature toggles.
  *
- * All features are opt-in. A minimal container has all defaults (storage
- * isolation only). GMS and fingerprint are independent — you can spoof the
- * device fingerprint without enabling GMS virtualization, or vice versa.
+ * v0.1.0 supports: storage isolation and GMS account assignment.
+ * Fingerprint spoof, signature spoof, anti-detection, and network
+ * isolation are stubs — config fields exist but hooks are not wired.
  */
 @Parcelize
 data class InstanceConfig(
@@ -79,6 +94,14 @@ data class InstanceConfig(
      *  intercept SafetyNet/Play Integrity API calls. */
     val enableAntiDetection: Boolean = true,
 
+    /** Enable SafetyNet + Play Integrity bypass for this instance.
+     *  When ON: SafetyNetBypass and PlayIntegrityBypass are initialized,
+     *  spoofing attestation responses and integrity verdicts so apps that
+     *  require CTS/Play Integrity pass their checks inside the container.
+     *  Requires [enableAntiDetection] to also be true for full coverage.
+     *  Default OFF — only enable for apps that strictly require it. */
+    val enableSafetyNetBypass: Boolean = false,
+
     // ── Device Spoof Values (custom override, null = auto-generate) ──────────
     /** Custom device model (e.g., "Pixel 7"). Null = auto from seed. */
     val spoofModel: String? = null,
@@ -112,6 +135,15 @@ data class InstanceConfig(
     val batteryCapacityMah: Int? = null,     // e.g. 4500
     // Network
     val wifiMacPrefix: String? = null,       // e.g. "AC:37:43" (first 3 octets)
+
+    // ── Visual Customization ───────────────────────────────────────────────
+    /** Accent color for this instance as a hex string (e.g. "#FF5733").
+     *  When set, a colored ring is drawn around the app icon. Null = no ring. */
+    val instanceColor: String? = null,
+
+    /** Short emoji or 1-2 char label shown as overlay at TopStart of the app icon
+     *  (e.g. "2", "🔥"). Null = no overlay. */
+    val instanceEmoji: String? = null,
 
 ) : Parcelable
 

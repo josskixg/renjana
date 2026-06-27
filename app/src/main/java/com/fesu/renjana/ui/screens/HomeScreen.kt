@@ -18,7 +18,6 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ArrowDownward
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Edit
-import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material.icons.filled.ViewList
 import androidx.compose.material.icons.filled.ViewModule
@@ -34,8 +33,10 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.foundation.border
 import com.fesu.renjana.RenjanaApplication
 import com.fesu.renjana.core.InstanceState
+import com.fesu.renjana.database.InstanceAppEntity
 import com.fesu.renjana.models.Instance
 import com.fesu.renjana.ui.components.AppIcon
 import com.fesu.renjana.ui.components.EmptyStateIllustration
@@ -58,15 +59,19 @@ enum class HomeViewMode { LIST, GRID }
 fun HomeScreen(
     viewModel: HomeViewModel = androidx.lifecycle.viewmodel.compose.viewModel(),
     onNavigateToApps: () -> Unit = {},
-    onInstanceClick: (String) -> Unit = {}
+    onInstanceClick: (String) -> Unit = {},
+    onCreateInstance: (String) -> Unit = {}
 ) {
     val instances by viewModel.instances.collectAsState()
     val isLoading by viewModel.isLoading.collectAsState()
     val error by viewModel.error.collectAsState()
+    val createdInstanceId by viewModel.createdInstanceId.collectAsState()
 
     val snackbarHostState = remember { SnackbarHostState() }
     var viewMode by remember { mutableStateOf(HomeViewMode.LIST) }
     var editMode by remember { mutableStateOf(false) }
+    var showCreateDialog by remember { mutableStateOf(false) }
+    var pendingDeleteId by remember { mutableStateOf<String?>(null) }
 
     // Track scroll state for list
     val listState = androidx.compose.foundation.lazy.rememberLazyListState()
@@ -92,53 +97,27 @@ fun HomeScreen(
         }
     }
 
+    // Navigate to new container after creation
+    LaunchedEffect(createdInstanceId) {
+        createdInstanceId?.let { id ->
+            onCreateInstance(id)
+            viewModel.clearCreatedInstanceId()
+        }
+    }
+
     Scaffold(
         snackbarHost = { SnackbarHost(snackbarHostState) },
-        floatingActionButton = {
-            if (!editMode) {
-                FloatingActionButton(
-                    onClick = {
-                        haptics.tap()
-                        onNavigateToApps()
-                    },
-                    shape = RoundedCornerShape(16.dp)
-                ) {
-                    Icon(
-                        Icons.Filled.Add,
-                        contentDescription = "Create instance"
-                    )
-                }
-            }
-        },
-        containerColor = MaterialTheme.colorScheme.background,
-    ) { padding ->
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(padding)
-                .statusBarsPadding()
-        ) {
-            // Header
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 16.dp, vertical = 12.dp),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text(
-                    text = "Instances",
-                    style = MaterialTheme.typography.headlineSmall,
-                    fontWeight = FontWeight.Bold
-                )
-                Row {
+        topBar = {
+            TopAppBar(
+                title = { Text("Instances", fontWeight = FontWeight.Bold) },
+                actions = {
                     IconButton(onClick = {
                         haptics.tick()
                         viewMode = if (viewMode == HomeViewMode.LIST) HomeViewMode.GRID else HomeViewMode.LIST
                     }) {
                         Icon(
                             if (viewMode == HomeViewMode.LIST) Icons.Filled.ViewModule else Icons.Filled.ViewList,
-                            contentDescription = "Toggle view"
+                            contentDescription = if (viewMode == HomeViewMode.LIST) "Grid view" else "List view"
                         )
                     }
                     if (instances.isNotEmpty()) {
@@ -155,7 +134,31 @@ fun HomeScreen(
                         }
                     }
                 }
+            )
+        },
+        floatingActionButton = {
+            if (!editMode) {
+                FloatingActionButton(
+                    onClick = {
+                        haptics.tap()
+                        showCreateDialog = true
+                    },
+                    shape = RoundedCornerShape(16.dp)
+                ) {
+                    Icon(
+                        Icons.Filled.Add,
+                        contentDescription = "Add instance"
+                    )
+                }
             }
+        },
+        containerColor = MaterialTheme.colorScheme.background,
+    ) { padding ->
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(padding)
+        ) {
 
             // Stats
             if (instances.isNotEmpty() || isLoading) {
@@ -194,21 +197,18 @@ fun HomeScreen(
                                         isRunning = state == InstanceState.RUNNING,
                                         isPaused = state == InstanceState.PAUSED,
                                         editMode = editMode,
+                                        viewModel = viewModel,
                                         onClick = {
                                             haptics.tap()
                                             if (editMode) editMode = false
                                             onInstanceClick(instance.id)
-                                        },
-                                        onLaunch = {
-                                            haptics.confirm()
-                                            viewModel.launchInstance(instance.id)
                                         },
                                         onStop = {
                                             viewModel.stopInstance(instance.id)
                                         },
                                         onDelete = {
                                             haptics.reject()
-                                            viewModel.deleteInstance(instance.id)
+                                            pendingDeleteId = instance.id
                                         }
                                     )
                                 }
@@ -237,16 +237,12 @@ fun HomeScreen(
                                             if (editMode) editMode = false
                                             onInstanceClick(instance.id)
                                         },
-                                        onLaunch = {
-                                            haptics.confirm()
-                                            viewModel.launchInstance(instance.id)
-                                        },
                                         onStop = {
                                             viewModel.stopInstance(instance.id)
                                         },
                                         onDelete = {
                                             haptics.reject()
-                                            viewModel.deleteInstance(instance.id)
+                                            pendingDeleteId = instance.id
                                         }
                                     )
                                 }
@@ -260,6 +256,94 @@ fun HomeScreen(
             }
         }
     }
+
+    // Create Container Dialog
+    if (showCreateDialog) {
+        CreateContainerDialog(
+            onDismiss = { showCreateDialog = false },
+            onCreate = { name ->
+                viewModel.createContainer(name)
+                showCreateDialog = false
+            }
+        )
+    }
+
+    // Delete Instance Confirmation Dialog
+    pendingDeleteId?.let { id ->
+        AlertDialog(
+            onDismissRequest = { pendingDeleteId = null },
+            title = { Text("Delete Instance") },
+            text = { Text("This will permanently delete the instance and all its data. Continue?") },
+            confirmButton = {
+                TextButton(
+                    onClick = { viewModel.deleteInstance(id); pendingDeleteId = null },
+                    colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.error)
+                ) { Text("Delete") }
+            },
+            dismissButton = {
+                TextButton(onClick = { pendingDeleteId = null }) { Text("Cancel") }
+            }
+        )
+    }
+}
+
+@Composable
+private fun CreateContainerDialog(
+    onDismiss: () -> Unit,
+    onCreate: (String) -> Unit
+) {
+    var containerName by remember { mutableStateOf("") }
+    var nameError by remember { mutableStateOf<String?>(null) }
+
+    AlertDialog(
+        onDismissRequest = {
+            onDismiss()
+            containerName = ""
+            nameError = null
+        },
+        title = { Text("New Container", fontWeight = FontWeight.Bold) },
+        text = {
+            Column {
+                Text(
+                    "A container holds multiple apps with isolated storage and accounts.",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Spacer(modifier = Modifier.height(16.dp))
+                OutlinedTextField(
+                    value = containerName,
+                    onValueChange = {
+                        containerName = it
+                        nameError = null
+                    },
+                    label = { Text("Container name") },
+                    placeholder = { Text("e.g. Work, Gaming, Shopping") },
+                    isError = nameError != null,
+                    supportingText = nameError?.let { err -> { Text(err, color = MaterialTheme.colorScheme.error) } },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = {
+                    if (containerName.isBlank()) {
+                        nameError = "Name cannot be empty"
+                    } else {
+                        onCreate(containerName.trim())
+                        containerName = ""
+                    }
+                }
+            ) { Text("Create") }
+        },
+        dismissButton = {
+            TextButton(onClick = {
+                onDismiss()
+                containerName = ""
+            }) { Text("Cancel") }
+        }
+    )
 }
 
 @Composable
@@ -306,13 +390,14 @@ private fun InstanceListCard(
     isRunning: Boolean,
     isPaused: Boolean,
     editMode: Boolean,
+    viewModel: HomeViewModel,
     onClick: () -> Unit,
-    onLaunch: () -> Unit,
     onStop: () -> Unit,
     onDelete: () -> Unit
 ) {
     val dateFormat = remember { SimpleDateFormat("dd MMM yyyy", Locale.getDefault()) }
     val scale by animateFloatAsState(if (editMode) 0.97f else 1f, label = "cardScale")
+    val instanceApps by viewModel.getAppsForInstance(instance.id).collectAsState(initial = emptyList())
 
     Card(
         modifier = Modifier
@@ -333,12 +418,74 @@ private fun InstanceListCard(
                     .padding(14.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                AppIcon(packageName = instance.packageName, size = 44.dp)
+                // Mini app grid — up to 4 icons
+                Box(modifier = Modifier.size(52.dp), contentAlignment = Alignment.BottomEnd) {
+                    when {
+                        instanceApps.isEmpty() -> {
+                            Box(
+                                modifier = Modifier
+                                    .size(52.dp)
+                                    .border(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.4f), CircleShape),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(
+                                    Icons.Filled.Add,
+                                    contentDescription = "Add app",
+                                    modifier = Modifier.size(20.dp),
+                                    tint = MaterialTheme.colorScheme.outline
+                                )
+                            }
+                        }
+                        instanceApps.size == 1 -> {
+                            AppIcon(
+                                packageName = instanceApps[0].packageName,
+                                size = 52.dp,
+                                showRenjanaBadge = true,
+                                instanceColor = instance.config.instanceColor,
+                                instanceEmoji = instance.config.instanceEmoji
+                            )
+                        }
+                        else -> {
+                            LazyVerticalGrid(
+                                columns = GridCells.Fixed(2),
+                                modifier = Modifier.size(52.dp),
+                                userScrollEnabled = false
+                            ) {
+                                items(instanceApps.take(4)) { app ->
+                                    AppIcon(
+                                        packageName = app.packageName,
+                                        size = 24.dp,
+                                        showRenjanaBadge = false
+                                    )
+                                }
+                            }
+                            if (instanceApps.size > 4) {
+                                Box(
+                                    modifier = Modifier
+                                        .align(Alignment.BottomEnd)
+                                        .size(18.dp)
+                                        .background(
+                                            MaterialTheme.colorScheme.primaryContainer,
+                                            CircleShape
+                                        ),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Text(
+                                        text = "+${instanceApps.size - 4}",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        fontSize = 8.sp,
+                                        color = MaterialTheme.colorScheme.onPrimaryContainer
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
                 Spacer(modifier = Modifier.width(12.dp))
                 Column(modifier = Modifier.weight(1f)) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Text(
-                            text = instance.appName,
+                            text = instance.appName.ifBlank { instance.appName },
                             style = MaterialTheme.typography.titleSmall,
                             fontWeight = FontWeight.SemiBold,
                             maxLines = 1,
@@ -354,7 +501,8 @@ private fun InstanceListCard(
                         }
                     }
                     Text(
-                        text = instance.packageName,
+                        text = if (instanceApps.isEmpty()) "No apps added"
+                               else instanceApps.joinToString(", ", limit = 2) { it.appName },
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         maxLines = 1,
@@ -377,13 +525,6 @@ private fun InstanceListCard(
                             )
                         }
                     }
-                    IconButton(onClick = onLaunch, modifier = Modifier.size(36.dp)) {
-                        Icon(
-                            Icons.Filled.PlayArrow,
-                            contentDescription = "Launch",
-                            modifier = Modifier.size(22.dp)
-                        )
-                    }
                 }
             }
             if (editMode) {
@@ -400,7 +541,7 @@ private fun InstanceListCard(
                         Icon(
                             Icons.Filled.Close,
                             contentDescription = "Delete",
-                            tint = Color.White,
+                            tint = MaterialTheme.colorScheme.onError,
                             modifier = Modifier.size(16.dp)
                         )
                     }
@@ -418,7 +559,6 @@ private fun InstanceGridCard(
     isPaused: Boolean,
     editMode: Boolean,
     onClick: () -> Unit,
-    onLaunch: () -> Unit,
     onStop: () -> Unit,
     onDelete: () -> Unit
 ) {
@@ -444,7 +584,12 @@ private fun InstanceGridCard(
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
                 Box {
-                    AppIcon(packageName = instance.packageName, size = 52.dp)
+                    AppIcon(
+                        packageName = instance.packageName,
+                        size = 52.dp,
+                        instanceColor = instance.config.instanceColor,
+                        instanceEmoji = instance.config.instanceEmoji
+                    )
                     if (isRunning || isPaused) {
                         RunningIndicator(
                             isRunning = isRunning,
@@ -452,6 +597,22 @@ private fun InstanceGridCard(
                             size = 8.dp,
                             modifier = Modifier.align(Alignment.BottomEnd)
                         )
+                    }
+                    Surface(
+                        shape = CircleShape,
+                        color = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier
+                            .align(Alignment.BottomStart)
+                            .size(16.dp)
+                    ) {
+                        Box(contentAlignment = Alignment.Center) {
+                            Text(
+                                text = "R",
+                                color = MaterialTheme.colorScheme.onPrimary,
+                                fontSize = 8.sp,
+                                style = MaterialTheme.typography.labelSmall
+                            )
+                        }
                     }
                 }
                 Spacer(modifier = Modifier.height(8.dp))
@@ -475,17 +636,6 @@ private fun InstanceGridCard(
                             Spacer(modifier = Modifier.width(4.dp))
                             Text("Stop", fontSize = 11.sp)
                         }
-                    } else {
-                        OutlinedButton(
-                            onClick = onLaunch,
-                            modifier = Modifier.fillMaxWidth(),
-                            shape = RoundedCornerShape(10.dp),
-                            contentPadding = PaddingValues(vertical = 4.dp)
-                        ) {
-                            Icon(Icons.Filled.PlayArrow, contentDescription = null, modifier = Modifier.size(16.dp))
-                            Spacer(modifier = Modifier.width(4.dp))
-                            Text("Launch", fontSize = 11.sp)
-                        }
                     }
                 }
             }
@@ -503,7 +653,7 @@ private fun InstanceGridCard(
                         Icon(
                             Icons.Filled.Close,
                             contentDescription = "Delete",
-                            tint = Color.White,
+                            tint = MaterialTheme.colorScheme.onError,
                             modifier = Modifier.size(16.dp)
                         )
                     }

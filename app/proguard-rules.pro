@@ -26,8 +26,20 @@
 -keep class de.robv.android.xposed.** { *; }
 
 # ── Pine hooking ──
+# Keep all Pine framework classes (entry points loaded by native lib).
 -keep class top.canyie.pine.** { *; }
 -keep class top.canyie.pine.callback.** { *; }
+# Pine ships native (JNI) methods; never strip them or the native bridge crashes.
+-keepclasseswithmembernames class * {
+    native <methods>;
+}
+# Pine MethodHook subclasses created via reflection — keep every override.
+-keep class * extends top.canyie.pine.callback.MethodHook { *; }
+-keep class * extends top.canyie.pine.callback.MethodReplacement { *; }
+-keepclassmembers class * extends top.canyie.pine.callback.MethodHook { *; }
+-keepclassmembers class * extends top.canyie.pine.callback.MethodReplacement { *; }
+# Suppress R8 warnings about Pine internals it cannot resolve.
+-dontwarn top.canyie.pine.**
 
 # ── Keep reflection targets (WrapperActivity uses reflection) ──
 -keepclassmembers class com.fesu.renjana.core.WrapperActivity { *; }
@@ -47,6 +59,9 @@
 
 # ── Keep GMS virtualization ──
 -keep class com.fesu.renjana.gms.** { *; }
+
+# ── Keep virtualization layer (GuestInfoCache accessed via reflection by hooks) ──
+-keep class com.fesu.renjana.virtual.** { *; }
 
 # ── Compose UI ──
 -dontwarn androidx.compose.**

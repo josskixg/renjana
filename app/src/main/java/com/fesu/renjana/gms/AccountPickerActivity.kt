@@ -16,8 +16,8 @@ import kotlinx.coroutines.launch
  */
 class AccountPickerActivity : AppCompatActivity() {
     companion object {
-        const val EXTRA_INSTANCE_ID = "instance_id"
-        const val EXTRA_SELECTED_ACCOUNT_ID = "selected_account_id"
+        const val EXTRA_INSTANCE_ID = GoogleSignInVirtualizer.EXTRA_INSTANCE_ID
+        const val EXTRA_SELECTED_ACCOUNT_ID = GoogleSignInVirtualizer.EXTRA_SELECTED_ACCOUNT_ID
     }
 
     private lateinit var instanceId: String

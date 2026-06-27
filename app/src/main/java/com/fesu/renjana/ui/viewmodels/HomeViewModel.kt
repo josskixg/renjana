@@ -4,8 +4,11 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.fesu.renjana.RenjanaApplication
 import com.fesu.renjana.core.InstanceLifecycleService
+import com.fesu.renjana.core.LaunchResult
+import com.fesu.renjana.database.InstanceAppEntity
 import com.fesu.renjana.models.Instance
 import com.fesu.renjana.utils.RenjanaLog
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -65,9 +68,18 @@ class HomeViewModel : ViewModel() {
     fun launchInstance(instanceId: String) {
         viewModelScope.launch {
             try {
-                val success = instanceLauncher.launchInstance(instanceId)
-                if (!success) {
-                    _error.value = "Failed to launch instance. Check Error Logs for details."
+                when (val result = instanceLauncher.launchInstance(instanceId)) {
+                    is LaunchResult.Success -> {
+                        // Full isolation — no user notification needed
+                    }
+                    is LaunchResult.FallbackNoIsolation -> {
+                        RenjanaLog.w(TAG, "Instance launched without isolation: ${result.reason}")
+                        _error.value = "⚠️ Running without isolation: ${result.reason}"
+                    }
+                    is LaunchResult.Failure -> {
+                        RenjanaLog.e(TAG, "Instance launch failed: ${result.message}")
+                        _error.value = result.message
+                    }
                 }
             } catch (e: Exception) {
                 RenjanaLog.e(TAG, "Failed to launch instance: ${e.message}")
@@ -91,5 +103,44 @@ class HomeViewModel : ViewModel() {
 
     fun clearError() {
         _error.value = null
+    }
+
+    fun getAppsForInstance(instanceId: String): Flow<List<InstanceAppEntity>> {
+        return instanceManager.getAppsForInstance(instanceId)
+    }
+
+    private val _createdInstanceId = MutableStateFlow<String?>(null)
+    val createdInstanceId: StateFlow<String?> = _createdInstanceId.asStateFlow()
+
+    fun createContainer(name: String) {
+        RenjanaLog.i(TAG, "Creating container: $name")
+        viewModelScope.launch {
+            try {
+                val result = instanceManager.createInstance(
+                    packageName = "",
+                    appName = name,
+                    versionName = "",
+                    versionCode = 0,
+                    apkPath = "",
+                    accountId = null
+                )
+                if (result.isSuccess) {
+                    val instance = result.getOrThrow()
+                    RenjanaLog.i(TAG, "Container created: ${instance.id}")
+                    _createdInstanceId.value = instance.id
+                } else {
+                    val msg = result.exceptionOrNull()?.message ?: "Failed to create container"
+                    RenjanaLog.e(TAG, "Container creation failed: $msg")
+                    _error.value = msg
+                }
+            } catch (e: Exception) {
+                RenjanaLog.e(TAG, "Failed to create container: ${e.message}")
+                _error.value = e.message ?: "Failed to create container"
+            }
+        }
+    }
+
+    fun clearCreatedInstanceId() {
+        _createdInstanceId.value = null
     }
 }

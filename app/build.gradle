@@ -14,7 +14,7 @@ android {
         minSdk 29
         targetSdk 34
         versionCode 1
-        versionName "0.0.1"
+        versionName "0.1.0"
 
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables {
@@ -57,6 +57,18 @@ android {
             excludes += '/META-INF/{AL2.0,LGPL2.1}'
         }
     }
+
+    // Pine native library (libpine.so) is ~2-3 MB per ABI.
+    // Split APKs per ABI so users download only the slice they need.
+    // Pine supports only armeabi-v7a and arm64-v8a (thumb-2 / arm64).
+    splits {
+        abi {
+            enable true
+            reset()
+            include 'armeabi-v7a', 'arm64-v8a'
+            universalApk true
+        }
+    }
 }
 
 dependencies {
@@ -77,8 +89,16 @@ dependencies {
     implementation 'androidx.lifecycle:lifecycle-viewmodel-compose:2.6.2'
     implementation 'androidx.navigation:navigation-compose:2.7.4'
 
-    // Hooking (Root) - Xposed API (compileOnly, not bundled)
+    // Hooking (Root) - Xposed API (compileOnly, not bundled at runtime).
+    // Pine provides Xposed API compatibility at runtime via pine:xposed below.
     compileOnly 'de.robv.android.xposed:api:82'
+
+    // Hooking (Non-Root) - Pine framework (bundled, includes native libpine.so).
+    // core: the hook engine (Pine.hook, PineConfig).
+    implementation 'top.canyie.pine:core:0.3.0'
+    // xposed: Xposed compatibility bridge — lets XC_MethodHook / XposedHelpers / XposedBridge
+    // work transparently on top of Pine. Required because CoreHooks uses Xposed callback types.
+    implementation 'top.canyie.pine:xposed:0.2.0'
 
     // Google Play Services (compileOnly for virtualization)
     compileOnly 'com.google.android.gms:play-services-auth:20.7.0'
