@@ -2,6 +2,9 @@ name: Android CI
 
 on:
   workflow_dispatch:
+  push:
+    branches:
+      - main
     inputs:
       build_type:
         description: 'Build type'
